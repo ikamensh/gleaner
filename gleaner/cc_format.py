@@ -71,12 +71,16 @@ ContentBlock = Annotated[
 # ── Messages ──────────────────────────────────────────────────
 
 
-class UserMessage(BaseModel):
+class UserPayload(BaseModel):
+    """The ``message`` field inside a UserMessage entry."""
+
     role: Literal["user"]
     content: str | list[ContentBlock]
 
 
-class AssistantMessage(BaseModel):
+class AssistantPayload(BaseModel):
+    """The ``message`` field inside an AssistantMessage entry."""
+
     role: Literal["assistant"]
     content: list[ContentBlock]
     model: str | None = None
@@ -105,32 +109,32 @@ class _EntryBase(BaseModel):
     gitBranch: str | None = None
 
 
-class UserEntry(_EntryBase):
+class UserMessage(_EntryBase):
     type: Literal["user"]
-    message: UserMessage
+    message: UserPayload
     promptId: str | None = None
     permissionMode: str | None = None
 
 
-class AssistantEntry(_EntryBase):
+class AssistantMessage(_EntryBase):
     type: Literal["assistant"]
-    message: AssistantMessage
+    message: AssistantPayload
     requestId: str | None = None
 
 
-class AttachmentEntry(_EntryBase):
+class Attachment(_EntryBase):
     type: Literal["attachment"]
     attachment: dict[str, Any]
 
 
-class ProgressEntry(_EntryBase):
+class Progress(_EntryBase):
     type: Literal["progress"]
     data: dict[str, Any]
     toolUseID: str | None = None
     parentToolUseID: str | None = None
 
 
-class SystemEntry(_EntryBase):
+class SystemMessage(_EntryBase):
     type: Literal["system"]
     subtype: str
     isMeta: bool = False
@@ -158,7 +162,7 @@ class SystemEntry(_EntryBase):
 # ── Metadata entries (no uuid / conversation tree) ────────────
 
 
-class PermissionModeEntry(BaseModel):
+class PermissionMode(BaseModel):
     type: Literal["permission-mode"]
     permissionMode: str
     sessionId: str
@@ -171,25 +175,25 @@ class FileHistorySnapshot(BaseModel):
     isSnapshotUpdate: bool
 
 
-class AgentNameEntry(BaseModel):
+class AgentName(BaseModel):
     type: Literal["agent-name"]
     agentName: str
     sessionId: str
 
 
-class CustomTitleEntry(BaseModel):
+class CustomTitle(BaseModel):
     type: Literal["custom-title"]
     customTitle: str
     sessionId: str
 
 
-class LastPromptEntry(BaseModel):
+class LastPrompt(BaseModel):
     type: Literal["last-prompt"]
     lastPrompt: str
     sessionId: str
 
 
-class QueueOperationEntry(BaseModel):
+class QueueOperation(BaseModel):
     type: Literal["queue-operation"]
     operation: str
     timestamp: str
@@ -200,16 +204,16 @@ class QueueOperationEntry(BaseModel):
 # ── Discriminated union of all entry types ────────────────────
 
 ConversationEntry = Annotated[
-    UserEntry
-    | AssistantEntry
-    | AttachmentEntry
-    | ProgressEntry
-    | SystemEntry
-    | PermissionModeEntry
+    UserMessage
+    | AssistantMessage
+    | Attachment
+    | Progress
+    | SystemMessage
+    | PermissionMode
     | FileHistorySnapshot
-    | AgentNameEntry
-    | CustomTitleEntry
-    | LastPromptEntry
-    | QueueOperationEntry,
+    | AgentName
+    | CustomTitle
+    | LastPrompt
+    | QueueOperation,
     Field(discriminator="type"),
 ]
