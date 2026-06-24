@@ -370,17 +370,11 @@ def store_session(
     transcript and metadata (last-write-wins) but does not re-increment
     any counter — each session_id is counted exactly once.
     """
-    # Check existence first so re-uploads don't double-count. Deliberately not
-    # a transaction: duplicates come from sequential retries, so the concurrent
-    # first-upload race is theoretical here and not worth the write-path cost.
     doc_ref = _db().collection("sessions").document(session_id)
     is_new = not doc_ref.get().exists
 
-    # Upload gzipped transcript to GCS (always overwrites the blob)
     blob = _bucket().blob(f"sessions/{session_id}.jsonl.gz")
     blob.upload_from_string(transcript_gz, content_type="application/gzip")
-
-    # Upsert metadata in Firestore
     doc_data = {
         **metadata,
         "provenance": provenance,
@@ -391,7 +385,7 @@ def store_session(
     }
     doc_ref.set(doc_data)
 
-    if is_new:  # idempotent: re-upload overwrites but never double-counts
+    if is_new:
         try:
             _update_counters(session_id, metadata, provenance)
         except Exception as e:

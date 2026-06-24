@@ -61,9 +61,9 @@ def cmd_setup(args):
         print(f"  Cursor  hook already in {CURSOR_HOOKS}")
 
     if install_backfill_agent():
-        print(f"  Sync    cursor backfill agent started (every 5 min)")
+        print(f"  Sync    backfill agent started — codex + cursor + claude (every 5 min)")
     else:
-        print(f"  Sync    cursor backfill agent already running")
+        print(f"  Sync    backfill agent already running")
 
     user = _check_server(args.url, args.token)
     if user:
@@ -154,7 +154,7 @@ def main():
     p.add_argument("--force", action="store_true", help="Re-upload existing")
     p.add_argument(
         "--source",
-        choices=["claude", "cursor"],
+        choices=["claude", "cursor", "codex", "all"],
         default="claude",
         help="Session source (default: claude)",
     )

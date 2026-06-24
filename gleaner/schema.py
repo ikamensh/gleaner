@@ -40,7 +40,7 @@ class SessionMeta(BaseModel):
     """
 
     session_id: str
-    ide: Literal["claude_code", "cursor"]
+    ide: Literal["claude_code", "cursor", "codex"]
     project: str
     topic: str
     cwd: str

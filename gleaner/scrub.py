@@ -10,6 +10,7 @@ Override with GLEANER_SCRUB_ENGINE=legacy or GLEANER_SCRUB_ENGINE=presidio.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
@@ -330,3 +331,59 @@ def scrub_text(text: str) -> tuple[str, ScrubStats]:
     except Exception as exc:
         _log.warning("Scrubbing failed (uploading as-is): %s", exc)
         return text, ScrubStats()
+
+
+def _scrub_json_value(value):
+    """Recursively scrub only the string values of a parsed JSON document.
+
+    Numbers/bools/null pass through untouched, so structural data (epoch
+    timestamps, counts, ids) is preserved and the document stays valid JSON.
+    Returns (scrubbed_value, ScrubStats).
+    """
+    if isinstance(value, str):
+        scrubbed, stats = scrub_text(value)
+        return scrubbed, stats
+    if isinstance(value, list):
+        stats = ScrubStats()
+        out = []
+        for item in value:
+            s, st = _scrub_json_value(item)
+            out.append(s)
+            stats = stats + st
+        return out, stats
+    if isinstance(value, dict):
+        stats = ScrubStats()
+        out = {}
+        for k, v in value.items():
+            s, st = _scrub_json_value(v)
+            out[k] = s
+            stats = stats + st
+        return out, stats
+    return value, ScrubStats()
+
+
+def scrub_jsonl(text: str) -> tuple[str, ScrubStats]:
+    """Scrub a JSONL transcript without breaking its JSON structure.
+
+    Each line is parsed and only its string values are scrubbed, so PII in
+    conversation text is removed while numeric fields stay intact and every
+    line remains valid JSON. Lines that are not JSON fall back to plain text
+    scrubbing. Returns (scrubbed_text, stats).
+    """
+    out_lines = []
+    stats = ScrubStats()
+    for line in text.split("\n"):
+        if not line.strip():
+            out_lines.append(line)
+            continue
+        try:
+            obj = json.loads(line)
+        except (json.JSONDecodeError, ValueError):
+            scrubbed, st = scrub_text(line)
+            out_lines.append(scrubbed)
+            stats = stats + st
+            continue
+        scrubbed_obj, st = _scrub_json_value(obj)
+        out_lines.append(json.dumps(scrubbed_obj, ensure_ascii=False, separators=(",", ":")))
+        stats = stats + st
+    return "\n".join(out_lines), stats

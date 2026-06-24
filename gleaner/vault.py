@@ -21,20 +21,50 @@ import shutil
 import sys
 from pathlib import Path
 
+from gleaner.codex import (
+    _CODEX_LINE_TYPES,
+    _codex_content_to_canonical,
+    _codex_tool_name,
+    parse_codex_transcript,
+)
 from gleaner.schema import NormalizedEntry, SessionMeta
 from gleaner.upload import CLAUDE_DIR, collect_provenance, parse_transcript
 
 VAULT_DIR = Path.home() / ".gleaner"
 
 
+def _role(raw: str | None) -> str:
+    """Coerce an arbitrary role/type to the NormalizedEntry vocabulary."""
+    return raw if raw in ("user", "assistant") else "unknown"
+
+
+def _normalize_codex_entry(entry: dict) -> dict:
+    """Normalize one Codex rollout line (payload-wrapped) to vault format."""
+    ts = entry.get("timestamp")
+    payload = entry.get("payload", {})
+    ptype = payload.get("type")
+    if entry.get("type") == "response_item" and ptype == "message":
+        content = _codex_content_to_canonical(payload.get("content", []))
+        return NormalizedEntry(role=_role(payload.get("role")), ts=ts, content=content).model_dump()
+    if entry.get("type") == "response_item" and (name := _codex_tool_name(payload)):
+        return NormalizedEntry(
+            role="unknown", ts=ts, content=[{"type": "tool_use", "name": name}]
+        ).model_dump()
+    # reasoning / tool output / event_msg / session_meta -> opaque marker
+    return NormalizedEntry(role="unknown", ts=ts, content=[]).model_dump()
+
+
 def normalize_entry(entry: dict) -> dict:
-    """Normalize a JSONL entry from either IDE format to vault format.
+    """Normalize a JSONL entry from any IDE format to vault format.
 
     Claude Code: {"type": "user", "timestamp": "...", "message": {"content": ...}}
     Cursor:      {"role": "user", "message": {"content": [...]}}
-    Output:      {"role": "user", "ts": "...|null", "content": [{...}, ...]}
+    Codex:       {"type": "response_item", "payload": {"role": ..., "content": [...]}}
+    Output:      {"role": "user|assistant|unknown", "ts": "...|null", "content": [...]}
     """
-    role = entry.get("type") or entry.get("role") or "unknown"
+    if "payload" in entry and entry.get("type") in _CODEX_LINE_TYPES:
+        return _normalize_codex_entry(entry)
+    role = _role(entry.get("type") or entry.get("role"))
     ts = entry.get("timestamp")
     content = entry.get("message", {}).get("content", [])
     if isinstance(content, str):
@@ -59,7 +89,8 @@ def ingest_session(
     if session_dir.exists():
         return None
 
-    meta = parse_transcript(raw_path)
+    parser = parse_codex_transcript if ide == "codex" else parse_transcript
+    meta = parser(raw_path)
     if meta.pop("worthless", False):
         return None
 
@@ -175,6 +206,22 @@ def collect(vault_dir: Path = VAULT_DIR) -> int:
         try:
             row = ingest_session(
                 session_id, path, "cursor", project_name,
+                vault_dir=vault_dir,
+            )
+            if row:
+                new_rows.append(row)
+        except Exception as e:
+            print(f"  {session_id[:12]}... skipped: {e}", file=sys.stderr)
+
+    # Codex
+    from gleaner.codex import find_all_codex_sessions
+
+    for session_id, project_name, path in find_all_codex_sessions():
+        if session_id in existing:
+            continue
+        try:
+            row = ingest_session(
+                session_id, path, "codex", project_name,
                 vault_dir=vault_dir,
             )
             if row:

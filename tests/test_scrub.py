@@ -6,10 +6,48 @@ import json
 
 import pytest
 
-from gleaner.scrub import SCRUB_ENGINE, ScrubStats, scrub_text
+from gleaner.scrub import SCRUB_ENGINE, ScrubStats, scrub_jsonl, scrub_text
 
 is_presidio = SCRUB_ENGINE == "presidio"
 is_legacy = not is_presidio
+
+
+class TestScrubJsonl:
+    """scrub_jsonl must keep transcripts valid JSON (regression: bare-int
+    epoch fields were being mangled into invalid JSON like
+    `"started_at":[pii-redacted]`, breaking Codex transcripts)."""
+
+    def test_output_lines_stay_valid_json(self):
+        # Codex-style line with several bare-int epoch fields.
+        line = json.dumps({"timestamp": "t", "type": "event_msg",
+                           "payload": {"type": "task_started",
+                                       "started_at": 1782297912,
+                                       "resets_at": 1782299384,
+                                       "model_context_window": 258400}})
+        out, _ = scrub_jsonl(line + "\n")
+        for ln in (x for x in out.splitlines() if x.strip()):
+            json.loads(ln)  # must not raise
+
+    def test_numbers_preserved(self):
+        line = json.dumps({"payload": {"started_at": 1782297912}})
+        out, _ = scrub_jsonl(line)
+        assert json.loads(out)["payload"]["started_at"] == 1782297912
+
+    def test_still_scrubs_pii_in_string_values(self):
+        line = json.dumps({"content": "card 4111111111111111 leaks"})
+        out, stats = scrub_jsonl(line)
+        assert "4111111111111111" not in out
+        assert stats.redactions >= 1
+        assert json.loads(out)  # still valid JSON
+
+    def test_non_json_line_falls_back_to_text_scrub(self):
+        out, stats = scrub_jsonl("OPENAI_API_KEY=sk-test-1234567890")
+        assert "sk-test-" not in out
+        assert stats.redactions >= 1
+
+    def test_blank_lines_preserved(self):
+        out, _ = scrub_jsonl('{"a":1}\n\n{"b":2}\n')
+        assert out.count("\n") == 3  # structure intact
 
 
 def test_scrub_redacts_api_keys():

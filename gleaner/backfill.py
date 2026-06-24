@@ -1,13 +1,15 @@
 """Upload existing session transcripts to Gleaner.
 
-Supports both Claude Code (~/.claude/projects/) and Cursor
-(~/.cursor/projects/agent-transcripts/) sessions through a
-unified pipeline.
+Supports Claude Code (~/.claude/projects/), Cursor
+(~/.cursor/projects/agent-transcripts/) and Codex
+(~/.codex/sessions/) through a unified pipeline.
 
 Usage:
     gleaner backfill                          # Claude Code (default)
     gleaner backfill --source cursor          # Cursor sessions
-    gleaner backfill --source cursor --dry-run
+    gleaner backfill --source codex           # Codex sessions
+    gleaner backfill --source all             # every local source
+    gleaner backfill --source codex --dry-run
     gleaner backfill --project foo            # filter by project name
 
 Config via environment variables:
@@ -17,11 +19,11 @@ Config via environment variables:
 
 import argparse
 import json
-import os
 import sys
 import urllib.request
 from pathlib import Path
 
+from gleaner.codex import find_all_codex_sessions, parse_codex_transcript
 from gleaner.config import get_credentials
 from gleaner.cursor import find_all_cursor_sessions
 from gleaner.tags import tag_session
@@ -29,17 +31,26 @@ from gleaner.upload import collect_provenance, parse_transcript, upload
 
 CLAUDE_DIR = Path.home() / ".claude"
 
+# source -> (finder(project_filter), parser(path), ide tag)
+SOURCES = {
+    "claude": (lambda p: find_all_sessions(p), parse_transcript, "claude_code"),
+    "cursor": (find_all_cursor_sessions, parse_transcript, "cursor"),
+    "codex": (find_all_codex_sessions, parse_codex_transcript, "codex"),
+}
+
 
 def get_existing_session_ids() -> set[str]:
-    """Fetch session IDs already on the server."""
+    """Fetch session IDs already on the server (all of them, not just recent)."""
     url, token = get_credentials()
     if not url or not token:
         return set()
     try:
-        req_url = f"{url.rstrip('/')}/api/sessions?ids_only=true"
+        # limit must be large: the default (100) would let backfill re-upload
+        # everything older, double-counting stats on each run.
+        req_url = f"{url.rstrip('/')}/api/sessions?ids_only=true&limit=1000000"
         req = urllib.request.Request(req_url)
         req.add_header("Authorization", f"Bearer {token}")
-        resp = urllib.request.urlopen(req, timeout=30)
+        resp = urllib.request.urlopen(req, timeout=60)
         data = json.loads(resp.read())
         return set(data.get("session_ids", []))
     except Exception:
@@ -68,6 +79,22 @@ def find_all_sessions(project_filter: str | None = None) -> list[tuple[str, str,
     return sessions
 
 
+def _gather(source: str, project: str | None) -> list[tuple[str, str, Path, str]]:
+    """Collect (session_id, project, path, ide) tuples for one or all sources."""
+    names = list(SOURCES) if source == "all" else [source]
+    found = []
+    for name in names:
+        finder, _parser, ide = SOURCES[name]
+        for sid, proj, path in finder(project):
+            found.append((sid, proj, path, ide))
+    return found
+
+
+def _parser_for(ide: str):
+    """Map an ide tag back to the parser that reads its transcript format."""
+    return parse_codex_transcript if ide == "codex" else parse_transcript
+
+
 def run(
     dry_run: bool = False,
     project: str | None = None,
@@ -80,34 +107,26 @@ def run(
         print("Error: not configured. Run 'gleaner setup URL TOKEN' first.", file=sys.stderr)
         sys.exit(1)
 
-    ide = "cursor" if source == "cursor" else "claude_code"
-
-    if source == "cursor":
-        sessions = find_all_cursor_sessions(project)
-    else:
-        sessions = find_all_sessions(project)
-
+    sessions = _gather(source, project)
     print(f"Found {len(sessions)} {source} session(s) on disk")
 
     if not force:
         existing = get_existing_session_ids()
-        sessions = [
-            (sid, proj, path) for sid, proj, path in sessions if sid not in existing
-        ]
+        sessions = [s for s in sessions if s[0] not in existing]
         print(f"{len(sessions)} new session(s) to upload")
 
     if dry_run:
-        for sid, proj, path in sessions:
+        for sid, proj, path, ide in sessions:
             size_kb = path.stat().st_size / 1024
-            print(f"  {sid[:12]}...  {proj}  ({size_kb:.0f} KB)")
+            print(f"  {sid[:12]}...  [{ide}]  {proj}  ({size_kb:.0f} KB)")
         return
 
     success = 0
     failed = 0
     skipped = 0
-    for i, (sid, proj, path) in enumerate(sessions, 1):
+    for i, (sid, proj, path, ide) in enumerate(sessions, 1):
         try:
-            metadata = parse_transcript(path)
+            metadata = _parser_for(ide)(path)
             if metadata.pop("worthless", False):
                 skipped += 1
                 continue
@@ -123,7 +142,7 @@ def run(
             metadata["has_errors"] = False
             upload(sid, metadata, path)
             success += 1
-            print(f"  [{i}/{len(sessions)}] {sid[:12]}... uploaded")
+            print(f"  [{i}/{len(sessions)}] {sid[:12]}... [{ide}] uploaded")
         except Exception as e:
             failed += 1
             print(f"  [{i}/{len(sessions)}] {sid[:12]}... FAILED: {e}")
@@ -140,7 +159,7 @@ def main():
     parser.add_argument("--force", action="store_true", help="Re-upload existing")
     parser.add_argument(
         "--source",
-        choices=["claude", "cursor"],
+        choices=["claude", "cursor", "codex", "all"],
         default="claude",
         help="Session source (default: claude)",
     )

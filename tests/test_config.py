@@ -182,7 +182,7 @@ class TestBackfillAgent:
         plist = plistlib.loads(config.LAUNCHD_PLIST.read_bytes())
         assert plist["Label"] == config.LAUNCHD_LABEL
         assert "--source" in plist["ProgramArguments"]
-        assert "cursor" in plist["ProgramArguments"]
+        assert "all" in plist["ProgramArguments"]
         assert plist["StartInterval"] == config.BACKFILL_INTERVAL
         assert plist["RunAtLoad"] is True
 

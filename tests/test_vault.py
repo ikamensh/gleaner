@@ -269,6 +269,11 @@ def _setup_cursor(cursor_dir, project, session_id, messages):
 class TestCollect:
     """collect scans IDE directories and populates the vault."""
 
+    @pytest.fixture(autouse=True)
+    def _isolate_codex(self, tmp_path, monkeypatch):
+        """Point Codex discovery at an empty dir so real ~/.codex is ignored."""
+        monkeypatch.setattr("gleaner.codex.SESSIONS_DIR", tmp_path / "no-codex")
+
     def test_claude_code(self, tmp_path, monkeypatch):
         """Claude Code sessions are discovered and ingested."""
         vault = tmp_path / "vault"

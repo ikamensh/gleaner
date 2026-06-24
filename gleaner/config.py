@@ -10,8 +10,10 @@ from pathlib import Path
 CONFIG_FILE = Path.home() / ".config" / "gleaner.json"
 CLAUDE_SETTINGS = Path.home() / ".claude" / "settings.json"
 CURSOR_HOOKS = Path.home() / ".cursor" / "hooks.json"
-LAUNCHD_LABEL = "com.gleaner.cursor-backfill"
+LAUNCHD_LABEL = "com.gleaner.sync"
 LAUNCHD_PLIST = Path.home() / "Library" / "LaunchAgents" / f"{LAUNCHD_LABEL}.plist"
+# Older single-source agent labels to clean up on (un)install.
+_LEGACY_LAUNCHD_LABELS = ["com.gleaner.cursor-backfill"]
 BACKFILL_INTERVAL = 300  # seconds
 
 HOOK_ENTRY = {
@@ -150,7 +152,11 @@ def remove_cursor_hook() -> bool:
     return True
 
 
-# -- Periodic Cursor backfill (launchd) ----------------------------------------
+# -- Periodic sync agent (launchd) ---------------------------------------------
+# Backfills every local source (Claude, Cursor, Codex) on an interval. Codex
+# has no realtime hook, so this agent is its primary auto-store path; for
+# Claude/Cursor it is a safety net behind their session hooks. Re-uploads are
+# idempotent server-side, so running it repeatedly never double-counts.
 
 
 def _backfill_command() -> str:
@@ -166,18 +172,34 @@ def _backfill_command() -> str:
     return "gleaner-backfill"
 
 
+def _legacy_plist(label: str) -> Path:
+    # Sibling of the current agent's plist, so tests that redirect
+    # LAUNCHD_PLIST also isolate legacy cleanup.
+    return LAUNCHD_PLIST.parent / f"{label}.plist"
+
+
+def _remove_legacy_agents():
+    """Unload and delete any superseded single-source backfill agents."""
+    for label in _LEGACY_LAUNCHD_LABELS:
+        plist = _legacy_plist(label)
+        if plist.exists():
+            subprocess.run(["launchctl", "unload", str(plist)], capture_output=True)
+            plist.unlink()
+
+
 def is_backfill_agent_installed() -> bool:
     return LAUNCHD_PLIST.exists()
 
 
 def install_backfill_agent() -> bool:
-    """Install a launchd agent that runs cursor backfill periodically."""
+    """Install a launchd agent that backfills all local sources periodically."""
+    _remove_legacy_agents()
     if LAUNCHD_PLIST.exists():
         return False
 
     plist = {
         "Label": LAUNCHD_LABEL,
-        "ProgramArguments": [_backfill_command(), "--source", "cursor"],
+        "ProgramArguments": [_backfill_command(), "--source", "all"],
         "StartInterval": BACKFILL_INTERVAL,
         "StandardOutPath": str(Path.home() / ".gleaner" / "backfill.log"),
         "StandardErrorPath": str(Path.home() / ".gleaner" / "backfill.log"),
@@ -192,9 +214,10 @@ def install_backfill_agent() -> bool:
 
 
 def remove_backfill_agent() -> bool:
-    """Unload and remove the launchd backfill agent."""
-    if not LAUNCHD_PLIST.exists():
-        return False
-    subprocess.run(["launchctl", "unload", str(LAUNCHD_PLIST)], capture_output=True)
-    LAUNCHD_PLIST.unlink()
-    return True
+    """Unload and remove the launchd sync agent (and any legacy agents)."""
+    existed = LAUNCHD_PLIST.exists()
+    if existed:
+        subprocess.run(["launchctl", "unload", str(LAUNCHD_PLIST)], capture_output=True)
+        LAUNCHD_PLIST.unlink()
+    _remove_legacy_agents()
+    return existed
