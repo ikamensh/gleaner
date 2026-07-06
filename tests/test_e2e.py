@@ -13,9 +13,12 @@ Verifies the full upload-and-retrieve cycle:
 Requires GLEANER_URL + GLEANER_TOKEN (env vars or ~/.config/gleaner.json).
 
 Usage:
-    pytest tests/test_e2e.py                  # via pytest
+    GLEANER_LIVE=1 pytest tests/test_e2e.py   # opt-in for pytest (creates live data)
     python3 tests/test_e2e.py                 # upload + verify test
     python3 tests/test_e2e.py --live          # also run claude CLI smoke test
+
+These tests are skipped by default in pytest to avoid creating data on the
+deployed service. Set GLEANER_LIVE=1 to opt in.
 """
 
 from __future__ import annotations
@@ -33,12 +36,21 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 # ---------------------------------------------------------------------------
 from gleaner.config import get_credentials
 from gleaner.upload import parse_transcript, upload
 
 GLEANER_URL, GLEANER_TOKEN = get_credentials()
 REPO_DIR = Path(__file__).resolve().parent.parent
+
+# All tests in this module require explicit opt-in to avoid creating data on
+# the deployed service during normal CI/local test runs.
+pytestmark = pytest.mark.skipif(
+    not os.getenv("GLEANER_LIVE"),
+    reason="Live server tests are opt-in. Set GLEANER_LIVE=1 to run.",
+)
 
 # ---------------------------------------------------------------------------
 # Helpers

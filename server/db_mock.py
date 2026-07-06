@@ -492,6 +492,7 @@ def store_session(
     transcript_gz: bytes,
     transcript_size: int,
 ):
+    is_new = session_id not in _sessions
     doc = {
         **metadata,
         "session_id": session_id,
@@ -503,7 +504,8 @@ def store_session(
     }
     _sessions[session_id] = doc
     _transcripts[session_id] = transcript_gz
-    _update_mock_counters(session_id, metadata, provenance)
+    if is_new:  # idempotent: re-upload overwrites but never double-counts
+        _update_mock_counters(session_id, metadata, provenance)
 
 
 def get_session(session_id: str) -> dict | None:
