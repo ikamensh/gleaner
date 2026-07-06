@@ -12,7 +12,7 @@ https://gleaner-430011644943.europe-west1.run.app/gleaner/
 
 ```bash
 # Install the CLI (requires uv: https://docs.astral.sh/uv)
-uv tool install git+https://github.com/covenance-ai/gleaner
+uv tool install git+https://github.com/ikamensh/gleaner
 
 # Configure and install the session hooks (Claude Code + Cursor)
 gleaner setup https://gleaner-430011644943.europe-west1.run.app gl_your_token
