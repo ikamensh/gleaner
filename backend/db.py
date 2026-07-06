@@ -364,12 +364,23 @@ def store_session(
     transcript_gz: bytes,
     transcript_size: int,
 ):
-    """Store session metadata in Firestore and raw transcript in GCS."""
-    # Upload gzipped transcript to GCS
+    """Store session metadata in Firestore and raw transcript in GCS.
+
+    Upsert semantics: re-uploading an existing session_id overwrites the
+    transcript and metadata (last-write-wins) but does not re-increment
+    any counter — each session_id is counted exactly once.
+    """
+    # Check existence first so re-uploads don't double-count. Deliberately not
+    # a transaction: duplicates come from sequential retries, so the concurrent
+    # first-upload race is theoretical here and not worth the write-path cost.
+    doc_ref = _db().collection("sessions").document(session_id)
+    is_new = not doc_ref.get().exists
+
+    # Upload gzipped transcript to GCS (always overwrites the blob)
     blob = _bucket().blob(f"sessions/{session_id}.jsonl.gz")
     blob.upload_from_string(transcript_gz, content_type="application/gzip")
 
-    # Store metadata in Firestore
+    # Upsert metadata in Firestore
     doc_data = {
         **metadata,
         "provenance": provenance,
@@ -378,14 +389,15 @@ def store_session(
         "gcs_path": f"sessions/{session_id}.jsonl.gz",
         "uploaded_at": firestore.SERVER_TIMESTAMP,
     }
-    _db().collection("sessions").document(session_id).set(doc_data)
+    doc_ref.set(doc_data)
 
-    try:
-        _update_counters(session_id, metadata, provenance)
-    except Exception as e:
-        logging.warning("Counter update failed for session %s: %s", session_id, e)
+    if is_new:  # idempotent: re-upload overwrites but never double-counts
+        try:
+            _update_counters(session_id, metadata, provenance)
+        except Exception as e:
+            logging.warning("Counter update failed for session %s: %s", session_id, e)
 
-    # Invalidate caches so next read reflects the new session
+    # Invalidate caches so next read reflects the new/updated session
     _cache.pop("global_stats", None)
     if provenance.get("user"):
         _cache.pop(f"user_stats:{provenance['user']}", None)
