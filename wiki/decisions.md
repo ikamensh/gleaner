@@ -15,7 +15,7 @@ Accepted decisions:
 - Acceptance testing: default CI and local acceptance tests must prove capture, duplicate replacement, unique-session counting, exports, and raw retrieval without touching production.
 - Live-uploading end-to-end tests: keep behind explicit opt-in only. Default CI must not create deployed-service data.
 - Documentation: reflect actual supported sources and current behavior. Claude Code and Cursor are supported here; Codex capture is pending/separate.
-- Repository workflow: PR code changes against this fork, `ikamensh/gleaner`, as Hive's working repository for now.
+- Repository workflow: `ikamensh/gleaner` is the main development repository (decided 2026-07-06, source_type: user_provided); PR code changes against it.
 
 Assumptions carried forward:
 

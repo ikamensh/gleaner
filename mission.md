@@ -12,5 +12,5 @@ Its mission is to capture coding-agent transcripts, scrub sensitive content befo
 - Prefer deterministic local and CI acceptance tests that never touch production services by default.
 - Keep mock/local storage and cloud database behavior aligned for externally visible semantics.
 - Keep supported-source documentation accurate. Claude Code and Cursor capture are current same-tier scope here; kodo classification is in scope. Codex capture is part of the broader product spec but lands separately from this branch and must not be built here.
-- Use this fork, `ikamensh/gleaner`, as Hive's working repository for PRs until that changes.
+- `ikamensh/gleaner` is the main development repository (independent of the original covenance-ai fork parent); all PRs land here.
 
