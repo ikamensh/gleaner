@@ -1,8 +1,10 @@
 # Gleaner
 
-Harvest and centralize Claude Code session transcripts across your team.
+Harvest and centralize coding-agent session transcripts across your team.
 
-Gleaner automatically uploads complete session transcripts to central storage when a session ends. It gives your team visibility into how Claude Code is being used: which tools, which projects, how often, and the full conversation history.
+Gleaner automatically uploads complete session transcripts to central storage when a session ends. It gives your team visibility into how Claude Code and Cursor are being used: which tools, which projects, how often, and the full conversation history.
+
+Supported sources: **Claude Code** and **Cursor** are currently supported as same-tier official sources. Support for Codex capture is in-scope for the overall project but is pending (landing separately in another branch).
 
 https://gleaner-430011644943.europe-west1.run.app/gleaner/
 
@@ -12,32 +14,39 @@ https://gleaner-430011644943.europe-west1.run.app/gleaner/
 # Install the CLI (requires uv: https://docs.astral.sh/uv)
 uv tool install git+https://github.com/covenance-ai/gleaner
 
-# Configure and install the session hook
+# Configure and install the session hooks (Claude Code + Cursor)
 gleaner setup https://gleaner-430011644943.europe-west1.run.app gl_your_token
 
 # Check everything is working
 gleaner status
 ```
 
-That's it. Every Claude Code session auto-uploads from now on.
+That's it. New Claude Code and Cursor sessions auto-upload from now on.
 
 Get a token by signing in with Google at your Gleaner dashboard.
 
 ## CLI commands
 
 ```bash
-gleaner setup URL TOKEN     # Save config + install session hook
-gleaner status              # Show config, hook, and connection status
-gleaner on                  # Enable the session upload hook
-gleaner off                 # Disable the session upload hook
-gleaner auth TOKEN          # Update the API token
-gleaner backfill            # Upload existing sessions from ~/.claude/projects/
-gleaner backfill --dry-run  # Preview what would be uploaded
+gleaner setup URL TOKEN              # Save config + install Claude Code and Cursor hooks
+gleaner status                       # Show config, hook, and connection status
+gleaner on                           # Enable all session upload hooks
+gleaner off                          # Disable all session upload hooks
+gleaner auth TOKEN                   # Update the API token
+gleaner backfill                     # Upload existing Claude Code sessions from ~/.claude/projects/
+gleaner backfill --source cursor     # Upload existing Cursor sessions from ~/.cursor/projects/
+gleaner backfill --dry-run           # Preview what would be uploaded
+gleaner collect                      # Collect local IDE sessions into the local vault
+gleaner pull                         # Download sessions for local analysis (Parquet)
+gleaner pull --transcripts           # Also download raw transcripts
+gleaner serve                        # Start local dashboard (http://127.0.0.1:8765)
 ```
 
-Config is stored in `~/.config/gleaner.json`. The session hook is managed in `~/.claude/settings.json`.
+Config is stored in `~/.config/gleaner.json`. Claude Code hooks are managed in `~/.claude/settings.json`; Cursor hooks in `~/.cursor/hooks.json`.
 
 ## How it works
+
+### Claude Code
 
 ```
 Claude Code session ends
@@ -47,12 +56,31 @@ SessionEnd hook fires (gleaner-upload)
         |
         v
   - finds the session JSONL in ~/.claude/projects/
-  - parses metadata (message counts, tools used, duration)
+  - parses metadata (message counts, tools used, duration, timestamps)
   - optionally scrubs PII/secrets
+  - classifies source (human/kodo/test) and task_type
   - uploads metadata to Firestore + raw transcript to GCS
 ```
 
-Claude Code records full session transcripts locally as JSONL files. Gleaner collects these centrally so you can browse, search, and analyze them across your whole team.
+### Cursor
+
+```
+Cursor agent session ends
+        |
+        v
+stop hook fires (gleaner-cursor-upload)
+        |
+        v
+  - finds the session JSONL in ~/.cursor/projects/*/agent-transcripts/
+  - parses metadata (message counts, tools used)
+  - optionally scrubs PII/secrets
+  - classifies source (human/kodo/test) and task_type
+  - uploads metadata to Firestore + raw transcript to GCS
+```
+
+A periodic launchd agent (every 5 min) runs `gleaner backfill --source cursor` to catch any sessions missed by the stop hook.
+
+Both IDEs record full session transcripts locally as JSONL files. Gleaner collects these centrally so you can browse, search, and analyze them across your whole team.
 
 ## Dashboard
 
@@ -103,11 +131,18 @@ All data endpoints require a `Bearer` token (user token or Google JWT).
 ```
 gleaner/
   gleaner/              # Installable client package
-    cli.py                  # gleaner command: setup, status, on/off, auth
-    upload.py               # gleaner-upload: SessionEnd hook handler
-    backfill.py             # gleaner backfill: upload existing sessions
-    config.py               # Config file + Claude settings.json management
+    cli.py                  # gleaner command: setup, status, on/off, auth, backfill, collect, serve, pull
+    upload.py               # gleaner-upload: Claude Code SessionEnd hook handler
+    cursor.py               # Cursor session discovery (~/.cursor/projects/)
+    cursor_upload.py        # gleaner-cursor-upload: Cursor stop hook handler
+    backfill.py             # gleaner backfill: upload existing sessions (Claude Code + Cursor)
+    config.py               # Config file + Claude Code and Cursor hook management
+    tags.py                 # Session classification: source (human/kodo/test) and task_type
+    schema.py               # Vault data schema (SessionMeta, NormalizedEntry)
+    vault.py                # Local session vault (~/.gleaner/)
     scrub.py                # PII/secret scrubbing (optional deps)
+    cc_format.py            # Claude Code JSONL format helpers
+    pull.py                 # gleaner pull: download sessions to Parquet
   server/                   # FastAPI server (deployed to Cloud Run)
     server.py               # API routes and auth
     db.py                   # Firestore + GCS operations
@@ -138,12 +173,16 @@ Developer machine                        GCP (covenance-469421)
 +------------------+                     |   v           v            |
                                          | Firestore   GCS            |
 +------------------+                     | (metadata)  (transcripts)  |
-| Web browser      |--GET /api/sessions->|   |           |            |
-| Dashboard        |<--JSON/HTML---------|   v           v            |
-+------------------+                     | sessions/   sessions/      |
-                                         | users/      {id}.jsonl.gz  |
-                                         | tokens/                    |
+| Cursor           |                     |   |           |            |
+|  stop hook       |--POST /api/session->|   v           v            |
+|  gleaner-cursor- |                     | sessions/   sessions/      |
+|  upload          |                     | users/      {id}.jsonl.gz  |
++------------------+                     | tokens/                    |
                                          +----------------------------+
++------------------+
+| Web browser      |--GET /api/sessions->Cloud Run-->JSON/HTML
+| Dashboard        |
++------------------+
 ```
 
 ## Environment variables

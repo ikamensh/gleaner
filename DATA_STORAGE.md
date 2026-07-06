@@ -1,5 +1,7 @@
 # Gleaner Data Storage Diagram
 
+Gleaner currently supports **Claude Code** and **Cursor** capture as same-tier official sources. Support for Codex capture is in-scope for the overall project but is pending (landing separately in another branch).
+
 ```mermaid
 flowchart TB
     subgraph LOCAL_CLIENT["LOCAL CLIENT MACHINE"]
@@ -14,6 +16,17 @@ flowchart TB
             { type: user|assistant,
               timestamp: ISO 8601,
               message: { content: [...] } }"]
+        end
+
+        subgraph CURSOR["Cursor (source data, read-only)"]
+            CUR_SESSIONS["~/.cursor/projects/{project}/agent-transcripts/{id}/{id}.jsonl
+            ────────────────────────────
+            Format: JSONL (uncompressed)
+            Size: 5KB-200KB per session
+            One JSON object per line:
+            { role: user|assistant,
+              content: [...] }
+            Note: no per-message timestamps"]
         end
 
         subgraph CLIENT_CONFIG["Client Config"]
@@ -31,6 +44,13 @@ flowchart TB
             hooks.SessionEnd array
             Written by: gleaner install-hook
             Read by: Claude Code (triggers upload)"]
+
+            CURSOR_HOOKS["~/.cursor/hooks.json
+            ────────────────────
+            Format: JSON
+            hooks.stop array
+            Written by: gleaner install-hook
+            Read by: Cursor (triggers upload)"]
         end
 
         subgraph PULL_OUTPUT["Pulled Data (~/.gleaner/)"]
@@ -231,6 +251,8 @@ flowchart TB
     %% Data flows
     CC_SESSIONS -->|"SessionEnd hook
     reads .jsonl file"| UPLOAD_PIPELINE
+    CUR_SESSIONS -->|"stop hook / periodic
+    backfill agent"| UPLOAD_PIPELINE
     GLEANER_JSON -.->|"url + token"| UPLOAD_PIPELINE
     UPLOAD_PIPELINE -->|"POST metadata + gzip transcript"| API_WRITE
 
@@ -264,7 +286,7 @@ flowchart TB
     classDef mock fill:#f3e8fd,stroke:#a142f4,color:#000
 
     class GCP,FIRESTORE,GCS,FS_SESSIONS,FS_TOKENS,FS_USERS,FS_COUNTERS,GCS_SESSIONS,GCS_BACKUPS cloud
-    class LOCAL_CLIENT,CLAUDE_CODE,CLIENT_CONFIG,PULL_OUTPUT,CC_SESSIONS,GLEANER_JSON,CLAUDE_SETTINGS,PARQUET,TRANSCRIPTS_DIR local
+    class LOCAL_CLIENT,CLAUDE_CODE,CURSOR,CLIENT_CONFIG,PULL_OUTPUT,CC_SESSIONS,CUR_SESSIONS,GLEANER_JSON,CLAUDE_SETTINGS,CURSOR_HOOKS,PARQUET,TRANSCRIPTS_DIR local
     class UPLOAD_PIPELINE,PARSE,SCRUB,TAG,COMPRESS pipeline
     class SERVER,API_WRITE,API_READ,CACHE,STATS_CACHE server
     class MOCK,MOCK_STORE mock
