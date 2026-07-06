@@ -1,0 +1,31 @@
+Moonshot AI / Kimi Legal Documents — Sources and Purpose
+Downloaded: 2026-04-02
+==================================================
+
+Files are markdown converted using html2text (deterministic, no AI).
+Run download.py to re-fetch latest versions.
+
+Moonshot AI operates two platforms:
+  - International (Singapore entity): platform.moonshot.ai / platform.kimi.ai
+  - China (Beijing entity): platform.moonshot.cn
+
+
+1. api-terms-of-service.md
+   Source: https://platform.moonshot.ai/docs/agreement/modeluse
+   Purpose: Terms of Service for Kimi OpenPlatform (API usage).
+   Relevance: Covers acceptable use, IP rights, payment, disputes.
+   Note: Acceptable use restrictions are in Section 3 (no separate AUP).
+
+2. api-privacy-policy.md
+   Source: https://platform.moonshot.ai/docs/agreement/userprivacy
+   Purpose: Privacy Policy for Kimi OpenPlatform.
+   Relevance: Data collection, usage, sharing, security, GDPR provisions.
+
+Note: No standalone data training policy — training language is embedded
+in the ToS and Privacy Policy. The ToS states content may be used to
+"provide, maintain, develop, and improve the services" which includes
+model training. No documented opt-out mechanism.
+
+Consumer product terms (kimi.com) are JS-rendered and may need manual download:
+  - Consumer ToS: https://www.kimi.com/user/agreement/en/modelUse
+  - Consumer Privacy: https://www.kimi.com/user/agreement/en/userPrivacy

@@ -1,0 +1,39 @@
+Amazon Kiro Legal Documents — Sources and Purpose
+Downloaded: 2026-04-02
+==================================================
+
+Files are markdown converted using html2text (deterministic, no AI).
+Run download.py to re-fetch latest versions.
+
+Kiro is Amazon's AI IDE. It is licensed as "AWS Content" under the
+AWS Customer Agreement and AWS IP License. AWS Service Terms contain
+Kiro-specific clauses (Section 50).
+
+
+1. kiro-license.md
+   Source: https://kiro.dev/license/
+   Purpose: Kiro's license page — references AWS Customer Agreement and IP License.
+
+2. kiro-data-protection.md
+   Source: https://kiro.dev/docs/privacy-and-security/data-protection/
+   Purpose: Data storage, encryption, cross-region inference, opt-out for training.
+   Relevance: Most directly relevant. Free tier and individual subscribers
+   consent to data use for service improvement. Enterprise users' data is not stored.
+
+3. kiro-security.md
+   Source: https://kiro.dev/docs/privacy-and-security/
+   Purpose: Security overview — autopilot vs supervised mode, trusted commands.
+
+4. aws-customer-agreement.md
+   Source: https://aws.amazon.com/agreement/
+   Purpose: Master AWS Customer Agreement governing all AWS services incl. Kiro.
+
+5. aws-responsible-ai-policy.md
+   Source: https://aws.amazon.com/ai/responsible-ai/policy/
+   Purpose: Acceptable use policy for AWS AI services including Kiro.
+
+Also relevant:
+  - AWS Service Terms (Kiro in Section 50): https://aws.amazon.com/service-terms/
+  - AWS Privacy Notice: https://aws.amazon.com/privacy/
+  - AWS IP License: https://aws.amazon.com/legal/aws-ip-license-terms/
+  - AWS Data Privacy FAQ: https://aws.amazon.com/compliance/data-privacy-faq/

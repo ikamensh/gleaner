@@ -1,0 +1,62 @@
+Google / Gemini Legal Documents — Sources and Purpose
+Downloaded: 2026-04-02
+==================================================
+
+Files are markdown converted using html2text (deterministic, no AI).
+Run download.py to re-fetch latest versions.
+
+Google's legal landscape is complex — different terms apply depending on
+whether you use the free Gemini API, paid Gemini API, or Vertex AI.
+
+
+1. gemini-api-terms.md
+   Source: https://ai.google.dev/gemini-api/terms
+   Purpose: Gemini API Additional Terms of Service.
+   Relevance: Core terms for Gemini API usage. Key distinction:
+   - Unpaid tier: Google uses your data to improve products
+   - Paid tier: Google does NOT use your data to improve products
+
+2. generative-ai-use-policy.md
+   Source: https://policies.google.com/terms/generative-ai/use-policy
+   Purpose: Generative AI Prohibited Use Policy.
+   Relevance: Acceptable use restrictions for all Gemini surfaces.
+
+3. google-privacy-policy.md
+   Source: https://policies.google.com/privacy
+   Purpose: Google-wide Privacy Policy.
+   Relevance: Applies to Gemini API usage under both paid and unpaid tiers.
+
+4. api-data-logging.md
+   Source: https://ai.google.dev/gemini-api/docs/logs-policy
+   Purpose: Data logging and sharing policy for Gemini API.
+   Relevance: Details what is logged, opt-in data sharing, paid vs unpaid.
+
+5. google-apis-tos.md
+   Source: https://developers.google.com/terms
+   Purpose: Google APIs Terms of Service (foundational ToS).
+   Relevance: Base terms that Gemini API terms build on.
+
+6. vertex-ai-tos.md
+   Source: https://cloud.google.com/terms/
+   Purpose: Google Cloud Platform Terms of Service.
+   Relevance: Governs Vertex AI usage (separate from consumer Gemini API).
+
+7. vertex-ai-service-terms.md
+   Source: https://cloud.google.com/terms/service-terms
+   Purpose: Service-specific terms including AI/ML section.
+   Relevance: Competitive use restrictions, data training prohibitions.
+
+Also relevant:
+  - Zero data retention guide: https://ai.google.dev/gemini-api/docs/zdr
+  - Cloud Data Processing Addendum: https://cloud.google.com/terms/data-processing-addendum
+  - Gemini CLI ToS mapping: https://geminicli.com/docs/resources/tos-privacy/
+
+
+Summary of which terms apply
+-----------------------------
+  Access method                  Governing terms
+  ---------------------------    ----------------------------
+  Free Gemini API                Gemini API Terms (unpaid) + Google APIs ToS
+  Paid Gemini API                Gemini API Terms (paid) + Google APIs ToS
+  Vertex AI                      GCP ToS + Service-Specific Terms
+  Gemini CLI                     Depends on auth method (see CLI ToS page)

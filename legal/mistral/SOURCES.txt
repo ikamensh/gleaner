@@ -1,0 +1,31 @@
+Mistral AI Legal Documents — Sources and Purpose
+Downloaded: 2026-04-02
+==================================================
+
+Files are markdown converted using html2text (deterministic, no AI).
+Run download.py to re-fetch latest versions.
+
+
+1. commercial-terms.md
+   Source: https://legal.mistral.ai/terms/commercial-terms-of-service
+   Purpose: Terms of Service for paid/commercial API usage (La Plateforme).
+
+2. privacy-policy.md
+   Source: https://legal.mistral.ai/terms/privacy-policy
+   Purpose: General privacy policy covering personal data processing.
+
+3. usage-policy.md
+   Source: https://legal.mistral.ai/terms/usage-policy
+   Purpose: Acceptable use / content policy for Mistral AI models and APIs.
+
+4. data-processing-addendum.md
+   Source: https://legal.mistral.ai/terms/data-processing-addendum
+   Purpose: How Mistral handles customer data via API (GDPR compliance).
+
+5. additional-terms.md
+   Source: https://legal.mistral.ai/terms/additional-terms
+   Purpose: Supplementary terms for La Plateforme (Mistral's own infrastructure).
+
+Also relevant:
+  - Customer infrastructure terms: https://legal.mistral.ai/terms/additional-terms-customer-infrastructure
+  - All legal docs index: https://legal.mistral.ai/terms

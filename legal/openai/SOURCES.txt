@@ -1,0 +1,43 @@
+OpenAI Legal Documents — Sources and Purpose
+Downloaded: 2026-04-02
+==================================================
+
+IMPORTANT: OpenAI uses Cloudflare bot protection. These files could NOT be
+downloaded programmatically. They need manual download — open each URL in a
+browser, save as HTML, then convert with html2text. See stubs for instructions.
+
+
+1. services-agreement.md [MANUAL DOWNLOAD NEEDED]
+   Source: https://openai.com/policies/services-agreement/
+   Purpose: Primary governing agreement for API users, businesses, and developers.
+
+2. business-terms.md [MANUAL DOWNLOAD NEEDED]
+   Source: https://openai.com/policies/business-terms
+   Purpose: Supplementary business terms incorporating service terms and policies.
+
+3. service-terms.md [MANUAL DOWNLOAD NEEDED]
+   Source: https://openai.com/policies/service-terms/
+   Purpose: Supporting service terms referenced by the Services Agreement.
+
+4. usage-policies.md [MANUAL DOWNLOAD NEEDED]
+   Source: https://openai.com/policies/usage-policies/
+   Purpose: Universal usage/acceptable use policies across all OpenAI products.
+
+5. privacy-policy.md [MANUAL DOWNLOAD NEEDED]
+   Source: https://openai.com/policies/privacy-policy/
+   Purpose: US Privacy Policy.
+
+6. api-data-usage.md [MANUAL DOWNLOAD NEEDED]
+   Source: https://openai.com/policies/api-data-usage-policies/
+   Purpose: API-specific data handling. Confirms API data is NOT used for
+   training unless you opt in.
+
+7. sharing-publication.md [MANUAL DOWNLOAD NEEDED]
+   Source: https://openai.com/policies/sharing-publication-policy/
+   Purpose: Rules for publishing and sharing API-generated content.
+
+Also relevant:
+  - ROW Privacy Policy: https://openai.com/policies/row-privacy-policy/
+  - Data Processing Addendum: https://openai.com/policies/data-processing-addendum/
+  - Developer data guide: https://developers.openai.com/api/docs/guides/your-data
+  - All policies index: https://openai.com/policies/

@@ -1,0 +1,66 @@
+Cursor (Anysphere) Legal Documents — Sources and Purpose
+Downloaded: 2026-04-02
+==================================================
+
+Files are markdown converted from Cursor's web pages using html2text
+(deterministic, no AI). Run download.py to re-fetch latest versions.
+Each file includes the source URL. Terms may be updated by Anysphere at any
+time — check the URLs for the authoritative latest.
+
+
+1. terms-of-service.md
+   Source: https://cursor.com/terms-of-service
+   Effective: January 13, 2026
+   Purpose: Terms of Service for individual users.
+   Relevance: Governs ownership of inputs/outputs, use restrictions,
+   model training commitments, and the "explicit agreement" mechanism
+   for data training (Privacy Mode toggle).
+
+2. privacy-policy.md
+   Source: https://cursor.com/privacy
+   Effective: October 6, 2025
+   Purpose: How Anysphere collects, uses, shares, and protects personal data.
+   Relevance: Lists data categories collected, third-party recipients,
+   retention policy (no specific durations — "as long as necessary"),
+   and user rights (access, deletion, correction).
+
+3. data-use.md
+   Source: https://cursor.com/data-use
+   Effective: October 20, 2025
+   Purpose: How Cursor handles code and session data under each privacy mode.
+   Relevance: Most directly relevant document. Describes three modes:
+   - Privacy Mode ON: zero retention at model providers, Cursor may store some code
+   - Privacy Mode OFF: data may be used for training, shared with model providers
+   - Privacy Mode (Legacy): strictest — no storage, no training at all
+
+4. security.md
+   Source: https://cursor.com/security
+   Effective: (no date listed)
+   Purpose: Security practices, SOC 2 Type II, subprocessor list, architecture.
+   Relevance: Lists third-party model and inference providers that handle data.
+
+5. msa.md
+   Source: https://cursor.com/terms/msa
+   Effective: July 17, 2025
+   Purpose: Master Services Agreement for enterprise/team customers.
+   Relevance: Stronger data protections — Customer Data defined as confidential,
+   30-day post-termination data retrieval window, explicit IP ownership clauses.
+   Contains acceptable use restrictions (no standalone AUP exists).
+
+6. dpa.md
+   Source: https://cursor.com/terms/dpa
+   Effective: November 5, 2025
+   Purpose: Data Processing Addendum (GDPR/UK GDPR compliance).
+   Relevance: Anysphere as processor, customer as controller. Covers subprocessor
+   requirements, data deletion, SCCs for international transfers.
+
+7. SESSION-DATA-RIGHTS.md
+   Not an Anysphere document — our own analysis summarizing the above
+   documents as they relate to storing Cursor session data.
+
+
+Note: Cursor has no standalone Acceptable Use Policy. Use restrictions
+are embedded in the ToS (Section 1.5) and MSA (Section 2.2).
+
+Note: The teams ToS (https://www.cursor.com/en/terms-of-service-teams)
+redirects to the same content as the individual ToS — not downloaded separately.

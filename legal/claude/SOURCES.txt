@@ -1,0 +1,71 @@
+Claude Code Legal Documents — Sources and Purpose
+Downloaded: 2026-04-02
+==================================================
+
+Files are markdown converted from Anthropic's web pages using html2text
+(deterministic, no AI). Run download.py to re-fetch latest versions.
+Each file includes the source URL. Terms may be updated by Anthropic at any
+time — check the URLs for the authoritative latest.
+
+
+1. consumer-terms.md
+   Source: https://www.anthropic.com/legal/consumer-terms
+   Effective: October 8, 2025
+   Purpose: Terms of Service for individual users on Free, Pro, and Max plans.
+   Relevance: Governs Claude Code usage when authenticated via OAuth (personal account).
+   Key points for session storage:
+   - You own your inputs and outputs.
+   - Anthropic may train on your data unless you opt out.
+   - Retention: 5 years (opt-in) or 30 days (opt-out).
+
+2. commercial-terms.md
+   Source: https://www.anthropic.com/legal/commercial-terms
+   Effective: June 17, 2025
+   Purpose: Terms of Service for Team, Enterprise, and API key users.
+   Relevance: Governs Claude Code usage when authenticated via API key or organizational account.
+   Key points for session storage:
+   - You own your inputs and outputs (explicit commercial use rights).
+   - Anthropic cannot train on your data.
+   - Retention: 30 days (or zero with ZDR).
+
+3. acceptable-use-policy.md
+   Source: https://www.anthropic.com/legal/aup
+   Effective: September 15, 2025
+   Purpose: Restrictions on what you may use Claude services for.
+   Relevance: Applies to all users regardless of plan. Constrains what session
+   data may contain or be used for (no illegal activity, weapons, CSAM, fraud,
+   building competing AI models, etc.).
+
+4. privacy-policy.md
+   Source: https://www.anthropic.com/legal/privacy
+   Effective: January 12, 2026
+   Purpose: How Anthropic collects, uses, and shares personal information.
+   Relevance: Covers what personal data Anthropic retains from sessions,
+   how it is processed, and your rights regarding that data (access, deletion, etc.).
+
+5. claude-code-legal-and-compliance.md
+   Source: https://code.claude.com/docs/en/legal-and-compliance
+   Purpose: Claude Code-specific legal guidance.
+   Relevance: Explains which set of terms applies based on authentication method
+   (OAuth -> Consumer Terms, API key -> Commercial Terms, existing agreement -> that agreement).
+   Also covers BAA/healthcare compliance and OAuth token restrictions.
+
+6. claude-code-data-usage.md
+   Source: https://code.claude.com/docs/en/data-usage
+   Purpose: How Claude Code handles data in practice.
+   Relevance: Directly relevant — describes what data Claude Code sends to Anthropic,
+   local session storage (up to 30 days, configurable), telemetry, training policy,
+   and env vars to control data sharing.
+
+7. SESSION-DATA-RIGHTS.md
+   Not an Anthropic document — this is our own analysis summarizing the above
+   documents as they relate to storing Claude Code session data.
+
+
+Summary of which terms apply
+-----------------------------
+  Authentication method          Governing terms
+  ---------------------------    ----------------------------
+  Free / Pro / Max (OAuth)       Consumer Terms + AUP
+  Team / Enterprise / API key    Commercial Terms + AUP
+  AWS Bedrock / Google Vertex    Your existing agreement + AUP

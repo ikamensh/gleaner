@@ -1,0 +1,37 @@
+xAI (Grok) Legal Documents — Sources and Purpose
+Downloaded: 2026-04-02
+==================================================
+
+IMPORTANT: xAI uses Cloudflare bot protection. These files could NOT be
+downloaded programmatically. They need manual download — open each URL in a
+browser, save as HTML, then convert with html2text. See stubs for instructions.
+
+
+1. terms-of-service.md [MANUAL DOWNLOAD NEEDED]
+   Source: https://x.ai/legal/terms-of-service
+   Purpose: Consumer Terms of Service for individual Grok users.
+
+2. terms-of-service-enterprise.md [MANUAL DOWNLOAD NEEDED]
+   Source: https://x.ai/legal/terms-of-service-enterprise
+   Purpose: Enterprise Terms of Service — governs the xAI API and Grok Business.
+   Relevance: This is the one that applies to API usage.
+
+3. privacy-policy.md [MANUAL DOWNLOAD NEEDED]
+   Source: https://x.ai/legal/privacy-policy
+   Purpose: Main Privacy Policy.
+   Note: Explicitly states it does NOT apply to data processed for API/business.
+
+4. acceptable-use-policy.md [MANUAL DOWNLOAD NEEDED]
+   Source: https://x.ai/legal/acceptable-use-policy
+   Purpose: Acceptable Use Policy (applies to all users including API).
+
+5. data-processing-addendum.md [MANUAL DOWNLOAD NEEDED]
+   Source: https://x.ai/legal/data-processing-addendum
+   Purpose: DPA governing API data processing.
+   Key: xAI does not use API inputs/outputs for training. Auto-deleted in 30 days.
+
+Also relevant:
+  - Enterprise FAQ: https://x.ai/legal/faq-enterprise
+  - Security: https://x.ai/security
+  - API security FAQ: https://docs.x.ai/developers/faq/security
+  - Legal index: https://x.ai/legal

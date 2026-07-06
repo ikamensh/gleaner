@@ -1,0 +1,40 @@
+Groq (GroqCloud) Legal Documents — Sources and Purpose
+Downloaded: 2026-04-02
+==================================================
+
+Files are markdown converted using html2text (deterministic, no AI).
+Run download.py to re-fetch latest versions.
+
+
+1. services-agreement.md
+   Source: https://console.groq.com/docs/legal/services-agreement
+   Purpose: Primary terms governing GroqCloud API usage.
+   Note: This is the API agreement — the website Terms of Use (groq.com/terms-of-use)
+   explicitly excludes GroqCloud.
+
+2. privacy-policy.md
+   Source: https://groq.com/privacy-policy
+   Purpose: General privacy policy covering data collection and processing.
+
+3. ai-policy.md
+   Source: https://console.groq.com/docs/legal/ai-policy
+   Purpose: Acceptable use and responsible AI policy for GroqCloud.
+
+4. your-data.md
+   Source: https://console.groq.com/docs/your-data
+   Purpose: Data handling for API requests.
+   Relevance: Most directly relevant — confirms Groq does not retain customer
+   data by default for inference, covers ZDR, and data storage location.
+
+5. dpa.md
+   Source: https://console.groq.com/docs/legal/customer-data-processing-addendum
+   Purpose: Data Processing Addendum (GDPR compliance).
+
+6. feedback-policy.md
+   Source: https://console.groq.com/docs/feedback-policy
+   Purpose: How Groq handles user-submitted feedback (retained up to 3 years).
+
+Also relevant:
+  - Legal index: https://console.groq.com/docs/legal
+  - Framework overview: https://console.groq.com/docs/legal/contractual-framework-overview
+  - Trust center: https://trust.groq.com

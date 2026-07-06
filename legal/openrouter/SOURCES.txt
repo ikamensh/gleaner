@@ -1,0 +1,23 @@
+OpenRouter Legal Documents — Sources and Purpose
+Downloaded: 2026-04-02
+==================================================
+
+Files are markdown converted using html2text (deterministic, no AI).
+Run download.py to re-fetch latest versions.
+
+
+1. terms-of-service.md
+   Source: https://openrouter.ai/terms
+   Purpose: Full legal agreement covering API usage, credits/billing, user
+   content, training data opt-in, data processing, and arbitration.
+   Section 6 ("Prohibited Conduct") serves as the acceptable use policy.
+
+2. privacy-policy.md
+   Source: https://openrouter.ai/privacy
+   Purpose: Privacy policy covering personal data collection, cookies,
+   tracking, marketing, data deletion, and user rights.
+
+Note: OpenRouter is an aggregator — requests are routed to upstream providers
+(OpenAI, Anthropic, Google, etc.). Each provider's terms also apply to the
+data once it reaches them. See provider data retention docs:
+  https://openrouter.ai/docs/guides/privacy/logging

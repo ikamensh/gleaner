@@ -1,0 +1,30 @@
+DeepSeek Legal Documents — Sources and Purpose
+Downloaded: 2026-04-02
+==================================================
+
+Files are markdown converted using html2text (deterministic, no AI).
+Run download.py to re-fetch latest versions.
+
+
+1. terms-of-use.md
+   Source: https://cdn.deepseek.com/policies/en-US/deepseek-terms-of-use.html
+   Purpose: General Terms of Use covering all DeepSeek services.
+   Relevance: Acceptable use rules are in Section 3 (no separate AUP exists).
+
+2. privacy-policy.md
+   Source: https://cdn.deepseek.com/policies/en-US/deepseek-privacy-policy.html
+   Purpose: Privacy policy covering data collection, use, sharing, user rights.
+   Relevance: States they use personal data to train models but users can opt out.
+
+3. open-platform-terms.md
+   Source: https://cdn.deepseek.com/policies/en-US/deepseek-open-platform-terms-of-service.html
+   Purpose: API/developer-specific terms.
+   Relevance: Governs platform access, developer responsibilities.
+
+4. model-training-disclosure.md
+   Source: https://cdn.deepseek.com/policies/en-US/model-algorithm-disclosure.html
+   Purpose: Model training methodology and data sources disclosure.
+   Relevance: States pre-training does not use personal information.
+
+Note: DeepSeek has no standalone DPA — data processing obligations are
+in the Open Platform Terms and Privacy Policy.
