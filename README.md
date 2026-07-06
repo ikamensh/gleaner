@@ -94,7 +94,7 @@ Features:
 
 ## Deploy the server
 
-The server deploys to Cloud Run automatically on push to `main` via GitHub Actions.
+The server can be deployed to Cloud Run manually via GitHub Actions (using `workflow_dispatch`).
 
 For manual initial setup:
 
@@ -158,7 +158,7 @@ gleaner/
     test_e2e.py             # Upload-and-retrieve integration tests
     test_scrub.py           # PII scrubbing unit tests
   .github/workflows/
-    deploy.yml              # CI: test + deploy to Cloud Run on push
+    deploy.yml              # CI: test + manual deploy to Cloud Run
   pyproject.toml
 ```
 
