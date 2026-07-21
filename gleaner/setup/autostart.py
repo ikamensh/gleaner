@@ -102,12 +102,14 @@ def _win_value_name() -> str:
 def _win_query() -> bool:
     import winreg
 
-    with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _WIN_RUN_KEY) as key:
-        try:
+    # FileNotFoundError covers both a missing value and a missing Run key
+    # (fresh profiles don't have one until something registers).
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _WIN_RUN_KEY) as key:
             winreg.QueryValueEx(key, _win_value_name())
             return True
-        except FileNotFoundError:
-            return False
+    except FileNotFoundError:
+        return False
 
 
 def _win_install() -> bool:
@@ -117,7 +119,7 @@ def _win_install() -> bool:
         return False
     # gleaner-tray is a gui-script: windowed, so login doesn't flash a console.
     command = f'"{find_script("gleaner-tray")}"'
-    with winreg.OpenKey(
+    with winreg.CreateKeyEx(
         winreg.HKEY_CURRENT_USER, _WIN_RUN_KEY, 0, winreg.KEY_SET_VALUE
     ) as key:
         winreg.SetValueEx(key, _win_value_name(), 0, winreg.REG_SZ, command)
