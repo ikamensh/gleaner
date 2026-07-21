@@ -28,11 +28,16 @@ Get a token by signing in with Google at your Gleaner dashboard.
 ## CLI commands
 
 ```bash
-gleaner setup URL TOKEN              # Save config + install Claude Code and Cursor hooks
-gleaner status                       # Show config, hook, and connection status
+gleaner setup URL TOKEN [--name N]   # Save a remote + install Claude Code and Cursor hooks
+gleaner status                       # Show active remote, hooks, and connection status
 gleaner on                           # Enable all session upload hooks
 gleaner off                          # Disable all session upload hooks
-gleaner auth TOKEN                   # Update the API token
+gleaner auth TOKEN                   # Update the active remote's API token
+gleaner remote list                  # List configured remotes (* marks the active one)
+gleaner remote add NAME URL TOKEN    # Add/replace a remote (--no-activate to not switch)
+gleaner remote use NAME              # Switch the active remote (instance)
+gleaner remote remove NAME           # Delete a remote
+gleaner remote show [NAME]           # Show a remote's URL + live connection status
 gleaner backfill                     # Upload existing Claude Code sessions from ~/.claude/projects/
 gleaner backfill --source cursor     # Upload existing Cursor sessions from ~/.cursor/projects/
 gleaner backfill --dry-run           # Preview what would be uploaded
@@ -42,7 +47,7 @@ gleaner pull --transcripts           # Also download raw transcripts
 gleaner serve                        # Start local dashboard (http://127.0.0.1:8765)
 ```
 
-Config is stored in `~/.config/gleaner.json`. Claude Code hooks are managed in `~/.claude/settings.json`; Cursor hooks in `~/.cursor/hooks.json`.
+Config is stored in `~/.config/gleaner.json` as one or more **named remotes** (Gleaner server instances) with one active; the active remote is what hooks and the CLI upload to. Switch instances with `gleaner remote use NAME`, or override per-invocation with `GLEANER_REMOTE=NAME` (or `GLEANER_URL`/`GLEANER_TOKEN`). Claude Code hooks are managed in `~/.claude/settings.json`; Cursor hooks in `~/.cursor/hooks.json`.
 
 ## How it works
 

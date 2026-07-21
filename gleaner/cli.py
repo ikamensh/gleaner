@@ -6,6 +6,7 @@ Usage:
     gleaner on                 Enable the session upload hook
     gleaner off                Disable the session upload hook
     gleaner auth TOKEN         Update the API token
+    gleaner remote ...         Manage server instances (list/add/use/remove/show)
     gleaner backfill           Upload existing sessions
 """
 
@@ -16,8 +17,12 @@ import sys
 from gleaner.remote import GleanerClient
 from gleaner.setup.config import (
     CONFIG_FILE,
+    add_remote,
+    get_active,
     get_credentials,
-    read_config,
+    list_remotes,
+    remove_remote,
+    use_remote,
     write_config,
 )
 from gleaner.setup.installers import (
@@ -36,8 +41,8 @@ from gleaner.setup.installers import (
 
 
 def cmd_setup(args):
-    write_config(args.url, args.token)
-    print(f"  Config  saved to {CONFIG_FILE}")
+    add_remote(args.name, args.url, args.token, activate=True)
+    print(f"  Config  remote '{args.name}' saved to {CONFIG_FILE}")
 
     if install_hook():
         print(f"  Claude  hook installed in {CLAUDE_SETTINGS}")
@@ -65,6 +70,7 @@ def cmd_setup(args):
 
 def cmd_status(args):
     url, token = get_credentials()
+    active, _ = get_active()
 
     print("Gleaner\n")
 
@@ -74,6 +80,7 @@ def cmd_status(args):
         src = "env" if url else "not configured"
         print(f"  Config  {src}")
 
+    print(f"  Remote  {active or '—'}")
     print(f"  URL     {url or '—'}")
     print(f"  Token   {token[:8]}..." if token else "  Token   —")
     print(f"  Claude  hook {'enabled' if is_hook_installed() else 'disabled'}")
@@ -83,6 +90,10 @@ def cmd_status(args):
     if url and token:
         user = GleanerClient(url, token).whoami()
         print(f"  Auth    {user}" if user else "  Auth    failed")
+
+    others = [n for n in list_remotes() if n != active]
+    if others:
+        print(f"\n  Other remotes: {', '.join(others)}  (switch with 'gleaner remote use NAME')")
     print()
 
 
@@ -107,19 +118,74 @@ def cmd_off(args):
 
 
 def cmd_auth(args):
-    cfg = read_config()
-    url = cfg.get("url", "")
+    name, remote = get_active()
+    url = remote.get("url", "")
     if not url:
         print("Run 'gleaner setup URL TOKEN' first", file=sys.stderr)
         sys.exit(1)
-    write_config(url, args.token)
-    print(f"Token updated ({args.token[:8]}...)")
+    add_remote(name, url, args.token, activate=True)
+    print(f"Token updated for remote '{name}' ({args.token[:8]}...)")
 
     user = GleanerClient(url, args.token).whoami()
     if user:
         print(f"Connected as {user}")
     else:
         print("Could not verify — check the token")
+
+
+def cmd_remote(args):
+    action = args.remote_action
+
+    if action == "list":
+        remotes = list_remotes()
+        if not remotes:
+            print("No remotes configured. Add one with 'gleaner remote add NAME URL TOKEN'.")
+            return
+        active, _ = get_active()
+        for name, r in remotes.items():
+            mark = "*" if name == active else " "
+            print(f"{mark} {name:<12} {r.get('url', '')}")
+        return
+
+    if action == "add":
+        add_remote(args.name, args.url, args.token, activate=not args.no_activate)
+        is_active = get_active()[0] == args.name
+        print(f"Remote '{args.name}' " + ("added and active" if is_active else "added (inactive)"))
+        user = GleanerClient(args.url, args.token).whoami()
+        print(f"Connected as {user}" if user else "Could not verify — check URL and token")
+        return
+
+    if action == "use":
+        if use_remote(args.name):
+            print(f"Active remote is now '{args.name}'")
+        else:
+            print(f"No remote named '{args.name}'", file=sys.stderr)
+            sys.exit(1)
+        return
+
+    if action == "remove":
+        if remove_remote(args.name):
+            active, _ = get_active()
+            print(f"Removed remote '{args.name}'" + (f"; active is now '{active}'" if active else ""))
+        else:
+            print(f"No remote named '{args.name}'", file=sys.stderr)
+            sys.exit(1)
+        return
+
+    if action == "show":
+        remotes = list_remotes()
+        name = args.name or get_active()[0]
+        if not name or name not in remotes:
+            print(f"No remote named '{name}'" if name else "No active remote", file=sys.stderr)
+            sys.exit(1)
+        r = remotes[name]
+        print(f"Remote  {name}")
+        print(f"URL     {r.get('url', '')}")
+        token = r.get("token", "")
+        print(f"Token   {token[:8]}..." if token else "Token   —")
+        user = GleanerClient(r.get("url", ""), token).whoami()
+        print(f"Auth    {user}" if user else "Auth    failed")
+        return
 
 
 def cmd_serve(args):
@@ -172,6 +238,22 @@ def main():
     p = sub.add_parser("setup", help="Configure Gleaner and install the session hook")
     p.add_argument("url", help="Gleaner server URL")
     p.add_argument("token", help="API token (gl_...)")
+    p.add_argument("--name", default="default", help="Remote name (default: default)")
+
+    rp = sub.add_parser("remote", help="Manage Gleaner server instances (remotes)")
+    ra = rp.add_subparsers(dest="remote_action", required=True)
+    ra.add_parser("list", help="List configured remotes")
+    a = ra.add_parser("add", help="Add or replace a remote")
+    a.add_argument("name", help="Remote name")
+    a.add_argument("url", help="Gleaner server URL")
+    a.add_argument("token", help="API token (gl_...)")
+    a.add_argument("--no-activate", action="store_true", help="Add without making it active")
+    a = ra.add_parser("use", help="Switch the active remote")
+    a.add_argument("name", help="Remote name")
+    a = ra.add_parser("remove", help="Delete a remote")
+    a.add_argument("name", help="Remote name")
+    a = ra.add_parser("show", help="Show a remote's URL and connection status")
+    a.add_argument("name", nargs="?", help="Remote name (default: active)")
 
     sub.add_parser("status", help="Show configuration status")
     sub.add_parser("on", help="Enable the session upload hook")
@@ -213,6 +295,7 @@ def main():
         "on": cmd_on,
         "off": cmd_off,
         "auth": cmd_auth,
+        "remote": cmd_remote,
         "serve": cmd_serve,
         "collect": cmd_collect,
         "backfill": cmd_backfill,
