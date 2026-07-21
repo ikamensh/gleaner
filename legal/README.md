@@ -1,6 +1,6 @@
 # Legal Terms for AI Providers
 
-*Downloaded 2026-04-02. Terms change — re-run `download.py` in each folder to refresh.*
+*Downloaded 2026-04-02. Terms change — re-run `python legal/download.py` to refresh (optionally pass provider names).*
 
 Legal documents and analysis for all LLM providers and coding tools used by
 [kodo](../../kodo/) and our development workflow.
@@ -128,7 +128,7 @@ API key, you can opt out at DeepSeek directly.
 ## Per-Provider Details
 
 Each folder contains:
-- `download.py` — re-fetch documents (deterministic html2text, no AI)
+- `../download.py` — re-fetch documents for every provider (deterministic html2text, no AI)
 - `SOURCES.txt` — source URLs, purpose, relevance
 - `SESSION-DATA-RIGHTS.md` — standardized analysis (same 7 sections in each)
 - `*.md` — the actual legal documents

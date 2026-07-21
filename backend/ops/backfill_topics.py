@@ -21,8 +21,9 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-GCP_PROJECT = "covenance-469421"
-GCS_BUCKET = "gleaner-sessions"
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+from backend import db as dbmod
+from gleaner.sources.summary import first_text, make_topic
 
 _lock = threading.Lock()
 _updated = 0
@@ -31,7 +32,7 @@ _failed = 0
 
 
 def extract_topic(text: str) -> str:
-    """Extract first user message text from JSONL transcript."""
+    """First user message text from a JSONL transcript (same rule as capture)."""
     for line in text.split("\n"):
         line = line.strip()
         if not line:
@@ -42,20 +43,8 @@ def extract_topic(text: str) -> str:
             continue
         if entry.get("type") != "user":
             continue
-        content = entry.get("message", {}).get("content", "")
-        if isinstance(content, str):
-            topic = content.strip()
-        elif isinstance(content, list):
-            topic = ""
-            for block in content:
-                if isinstance(block, dict) and block.get("type") == "text":
-                    topic = (block.get("text") or "").strip()
-                    break
-        else:
-            continue
+        topic = make_topic(first_text(entry.get("message", {}).get("content", "")))
         if topic:
-            if len(topic) > 200:
-                topic = topic[:200] + "..."
             return topic
     return ""
 
@@ -108,11 +97,8 @@ def main():
     parser.add_argument("--workers", type=int, default=6)
     args = parser.parse_args()
 
-    from google.cloud import firestore, storage
-
-    db = firestore.Client(project=GCP_PROJECT)
-    gcs = storage.Client(project=GCP_PROJECT)
-    bucket = gcs.bucket(GCS_BUCKET)
+    db = dbmod._db()
+    bucket = dbmod._bucket()
 
     # Get all sessions
     sessions = []

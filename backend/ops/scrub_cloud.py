@@ -15,15 +15,16 @@ from __future__ import annotations
 
 import gzip
 import json
+import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+from backend import db as dbmod
 from gleaner.scrub import scrub_text
 
-GCP_PROJECT = "covenance-469421"
-GCS_BUCKET = "gleaner-sessions"
 REPORT_PATH = Path(__file__).parent / "scrub_report.json"
 
 _lock = threading.Lock()
@@ -154,18 +155,15 @@ def main():
     )
     args = parser.parse_args()
 
-    from google.cloud import firestore, storage
-
-    gcs = storage.Client(project=GCP_PROJECT)
-    bucket = gcs.bucket(GCS_BUCKET)
-    db = firestore.Client(project=GCP_PROJECT)
+    bucket = dbmod._bucket()
+    db = dbmod._db()
 
     blobs = [
         b for b in bucket.list_blobs(prefix="sessions/") if b.name.endswith(".jsonl.gz")
     ]
     total = len(blobs)
     t0 = time.time()
-    print(f"Found {total} transcript(s) in gs://{GCS_BUCKET}/sessions/")
+    print(f"Found {total} transcript(s) in gs://{dbmod.GCS_BUCKET}/sessions/")
     print(f"Using {args.workers} workers\n")
 
     with ThreadPoolExecutor(max_workers=args.workers) as pool:
