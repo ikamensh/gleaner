@@ -16,6 +16,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
+        with:
+          # piicleaner ships wheels up to cp313; newer pythons trigger a
+          # broken maturin source build on the macOS runner
+          python-version: "3.13"
       - uses: actions/setup-node@v4
         with:
           node-version: 22
