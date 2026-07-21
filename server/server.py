@@ -149,8 +149,8 @@ if LOCAL_MODE:
     _LOCAL_USER = {"name": getpass.getuser(), "active": True}
 
 
-def _require_token(authorization: str = Header("")) -> dict:
-    """Authenticate. Rejects non-onboarded Google users."""
+def _require_token(authorization: str = Header(""), allow_onboarding: bool = False) -> dict:
+    """Authenticate. Rejects non-onboarded Google users unless allow_onboarding."""
     if LOCAL_MODE:
         return _LOCAL_USER
     if MOCK_MODE:
@@ -163,26 +163,8 @@ def _require_token(authorization: str = Header("")) -> dict:
         return token_data
     google_data = _verify_google_jwt(token)
     if google_data:
-        if google_data.get("onboarding_required"):
+        if google_data.get("onboarding_required") and not allow_onboarding:
             raise HTTPException(403, "Onboarding required")
-        return google_data
-    raise HTTPException(403, "Invalid or revoked token")
-
-
-def _require_token_allow_onboarding(authorization: str = Header("")) -> dict:
-    """Authenticate, allowing non-onboarded Google users through."""
-    if LOCAL_MODE:
-        return _LOCAL_USER
-    if MOCK_MODE:
-        return _MOCK_USER
-    if not authorization.startswith("Bearer "):
-        raise HTTPException(401, "Missing Bearer token")
-    token = authorization[7:]
-    token_data = db.validate_token(token)
-    if token_data:
-        return token_data
-    google_data = _verify_google_jwt(token)
-    if google_data:
         return google_data
     raise HTTPException(403, "Invalid or revoked token")
 
@@ -303,7 +285,7 @@ def get_session_raw(session_id: str, authorization: str = Header("")):
 
 @app.get("/api/me")
 def get_me(authorization: str = Header("")):
-    token_data = _require_token_allow_onboarding(authorization)
+    token_data = _require_token(authorization, allow_onboarding=True)
 
     if token_data.get("onboarding_required"):
         return {
@@ -343,7 +325,7 @@ def get_stats(authorization: str = Header("")):
 @app.post("/api/onboard")
 async def onboard(request: Request, authorization: str = Header("")):
     """Complete user onboarding: set username, create user record."""
-    token_data = _require_token_allow_onboarding(authorization)
+    token_data = _require_token(authorization, allow_onboarding=True)
     email = token_data.get("email", "")
     if not email or token_data.get("auth_type") != "google":
         raise HTTPException(400, "Google authentication required for onboarding")
@@ -373,7 +355,7 @@ async def onboard(request: Request, authorization: str = Header("")):
 
 @app.get("/api/username-check/{username}")
 def check_username(username: str, authorization: str = Header("")):
-    token_data = _require_token_allow_onboarding(authorization)
+    token_data = _require_token(authorization, allow_onboarding=True)
     email = token_data.get("email", "")
     username = username.strip().lower()
 

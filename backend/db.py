@@ -11,6 +11,8 @@ import google.auth.transport.requests
 from google.api_core.exceptions import NotFound
 from google.cloud import firestore, storage
 
+from backend import stats
+
 GCP_PROJECT = os.environ.get("GLEANER_GCP_PROJECT", "covenance-469421")
 GCS_BUCKET = os.environ.get("GLEANER_GCS_BUCKET", "gleaner-sessions")
 CACHE_TTL_SECONDS = int(os.environ.get("GLEANER_CACHE_TTL", "300"))  # 5 minutes
@@ -55,22 +57,25 @@ def _token_hash(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
 
-def create_token(name: str, issued_to: str = "", notes: str = "") -> str:
-    """Create a new API token. Returns the raw token (shown only once)."""
+def _store_new_token(fields: dict) -> str:
+    """Mint a token, store its record, and return the raw token (shown once)."""
     token = f"gl_{secrets.token_urlsafe(32)}"
     _db().collection("tokens").document(_token_hash(token)).set(
         {
-            "name": name,
-            "issued_to": issued_to,
-            "notes": notes,
             "prefix": token[:8],
             "active": True,
             "created_at": firestore.SERVER_TIMESTAMP,
             "last_used_at": None,
             "usage_count": 0,
+            **fields,
         }
     )
     return token
+
+
+def create_token(name: str, issued_to: str = "", notes: str = "") -> str:
+    """Create a new API token. Returns the raw token (shown only once)."""
+    return _store_new_token({"name": name, "issued_to": issued_to, "notes": notes})
 
 
 def validate_token(token: str) -> dict | None:
@@ -174,21 +179,14 @@ def list_user_tokens(owner_email: str) -> list[dict]:
 
 def create_user_token(username: str, owner_email: str, token_name: str = "") -> str:
     """Create a token for a user. Returns the raw token (shown once)."""
-    token = f"gl_{secrets.token_urlsafe(32)}"
-    _db().collection("tokens").document(_token_hash(token)).set(
+    return _store_new_token(
         {
             "name": username,
             "issued_to": owner_email,
             "owner_email": owner_email,
             "notes": token_name or "Dashboard",
-            "prefix": token[:8],
-            "active": True,
-            "created_at": firestore.SERVER_TIMESTAMP,
-            "last_used_at": None,
-            "usage_count": 0,
         }
     )
-    return token
 
 
 def revoke_user_token(id_or_prefix: str, owner_email: str) -> bool:
@@ -247,85 +245,20 @@ def _counter_update(doc_ref, updates: dict):
         doc_ref.update(updates)
 
 
+# Map neutral counter-delta ops (backend.stats) to Firestore field transforms.
+_FIRESTORE_OPS = {
+    "inc": firestore.Increment,
+    "set": lambda v: v,
+    "union": firestore.ArrayUnion,
+}
+
+
 def _update_counters(session_id: str, metadata: dict, provenance: dict):
     """Incrementally update counter docs after a session upload."""
-    username = provenance.get("user", "")
-    project = metadata.get("project", "")
-    msg_count = metadata.get("message_count", 0)
-    tool_count = metadata.get("tool_use_count", 0)
-    tool_counts = metadata.get("tool_counts", {})
-    first_ts = metadata.get("first_timestamp", "")
-    last_ts = metadata.get("last_timestamp", "")
-    date_str = first_ts[:10] if len(first_ts) >= 10 else ""
-
-    duration = 0.0
-    if first_ts and last_ts:
-        try:
-            s = datetime.fromisoformat(first_ts.replace("Z", "+00:00"))
-            e = datetime.fromisoformat(last_ts.replace("Z", "+00:00"))
-            duration = (e - s).total_seconds()
-        except (ValueError, AttributeError):
-            pass
-
-    # --- Global counters (split across 4 docs to stay under index limits) ---
     counters = _db().collection("counters")
-
-    # Totals + tool usage
-    g = {
-        "total_sessions": firestore.Increment(1),
-        "total_messages": firestore.Increment(msg_count),
-        "total_tool_uses": firestore.Increment(tool_count),
-    }
-    for tool, count in tool_counts.items():
-        g[f"tool_usage.{tool}"] = firestore.Increment(count)
-    _counter_update(counters.document("global"), g)
-
-    # Daily timeline
-    if date_str:
-        _counter_update(counters.document("global:daily"), {date_str: firestore.Increment(1)})
-
-    # Per-user rollup
-    if username:
-        u_rollup = {
-            f"{username}.sessions": firestore.Increment(1),
-            f"{username}.messages": firestore.Increment(msg_count),
-            f"{username}.tool_uses": firestore.Increment(tool_count),
-            f"{username}.total_duration_seconds": firestore.Increment(duration),
-        }
-        if first_ts:
-            u_rollup[f"{username}.last_active"] = first_ts
-        _counter_update(counters.document("global:users"), u_rollup)
-
-    # Per-project rollup
-    if project:
-        p_rollup = {
-            f"{project}.sessions": firestore.Increment(1),
-            f"{project}.messages": firestore.Increment(msg_count),
-        }
-        if username:
-            p_rollup[f"{project}.users"] = firestore.ArrayUnion([username])
-        _counter_update(counters.document("global:projects"), p_rollup)
-
-    # --- User counter ---
-    if username:
-        u = {
-            "total_sessions": firestore.Increment(1),
-            "total_messages": firestore.Increment(msg_count),
-            "total_tool_uses": firestore.Increment(tool_count),
-            "total_duration_seconds": firestore.Increment(duration),
-            "last_session_id": session_id,
-            "last_active": first_ts or "",
-        }
-        for tool, count in tool_counts.items():
-            u[f"tool_usage.{tool}"] = firestore.Increment(count)
-        if project:
-            u[f"project_usage.{project}"] = firestore.Increment(1)
-        if date_str:
-            u[f"daily.{date_str}.s"] = firestore.Increment(1)
-            u[f"daily.{date_str}.m"] = firestore.Increment(msg_count)
-            u[f"daily.{date_str}.d"] = firestore.Increment(duration)
-
-        _counter_update(_db().collection("counters").document(f"user:{username}"), u)
+    for doc_name, fields in stats.counter_deltas(session_id, metadata, provenance).items():
+        updates = {path: _FIRESTORE_OPS[op](value) for path, (op, value) in fields.items()}
+        _counter_update(counters.document(doc_name), updates)
 
 
 def _recent_sessions(user: str | None = None, limit: int = 10) -> list[dict]:
@@ -334,24 +267,10 @@ def _recent_sessions(user: str | None = None, limit: int = 10) -> list[dict]:
     if user:
         query = query.where("provenance.user", "==", user)
     query = query.order_by("uploaded_at", direction=firestore.Query.DESCENDING).limit(limit)
-
-    results = []
-    for doc in query.stream():
-        data = doc.to_dict() or {}
-        results.append({
-            "session_id": doc.id,
-            "topic": data.get("topic", ""),
-            "project": data.get("project", ""),
-            "cwd": data.get("cwd", ""),
-            "user": data.get("provenance", {}).get("user", ""),
-            "message_count": data.get("message_count", 0),
-            "tool_use_count": data.get("tool_use_count", 0),
-            "first_timestamp": data.get("first_timestamp"),
-            "last_timestamp": data.get("last_timestamp"),
-            "provenance": data.get("provenance", {}),
-            "transcript_size": data.get("transcript_size", 0),
-        })
-    return results
+    return [
+        stats.session_summary({**(doc.to_dict() or {}), "session_id": doc.id})
+        for doc in query.stream()
+    ]
 
 
 # --- Sessions ---
@@ -478,101 +397,15 @@ def get_user_stats(username: str) -> dict:
 
 def _compute_user_stats(username: str) -> dict:
     """Read from user counter doc + limited queries. No full scan."""
-    from collections import defaultdict
-    from datetime import timedelta
-
-    now = datetime.now(timezone.utc)
-    today = now.date()
-    week_start = today - timedelta(days=today.weekday())  # Monday
-    prev_week_start = week_start - timedelta(days=7)
-    heatmap_start = (today.replace(day=1) - timedelta(days=90)).replace(day=1)
-    week_start_str = week_start.isoformat()
-    prev_week_start_str = prev_week_start.isoformat()
-
-    # 1 document read
     doc = _db().collection("counters").document(f"user:{username}").get()
     if not doc.exists:
-        return {
-            "user": username, "total_sessions": 0, "avg_messages_per_session": 0,
-            "last_session": None, "week_stats": {
-                "sessions": 0, "sessions_prev_week": 0, "messages": 0,
-                "avg_duration_seconds": 0, "total_duration_seconds": 0,
-                "active_days": 0, "most_active_project": "",
-            },
-            "heatmap": [], "tool_usage": {}, "project_usage": {}, "recent_sessions": [],
-        }
+        return stats.build_user_stats(username, None, [], None)
 
     u = doc.to_dict()
-    daily = u.get("daily", {})
-
-    # Week / prev-week stats from daily map
-    week_sessions = 0
-    week_messages = 0
-    week_duration = 0.0
-    week_active_days = 0
-    prev_week_sessions = 0
-    for date_str, day_data in daily.items():
-        if not isinstance(day_data, dict):
-            continue
-        if date_str >= week_start_str:
-            s = day_data.get("s", 0)
-            week_sessions += s
-            week_messages += day_data.get("m", 0)
-            week_duration += day_data.get("d", 0)
-            if s > 0:
-                week_active_days += 1
-        elif date_str >= prev_week_start_str:
-            prev_week_sessions += day_data.get("s", 0)
-
-    # Heatmap from daily map
-    heatmap_list = []
-    d = heatmap_start
-    while d <= today:
-        ds = d.isoformat()
-        day_data = daily.get(ds, {})
-        count = day_data.get("s", 0) if isinstance(day_data, dict) else 0
-        heatmap_list.append({"date": ds, "count": count})
-        d += timedelta(days=1)
-
-    # Recent sessions: limit query (~10 doc reads)
     recent = _recent_sessions(user=username, limit=20)
-
-    # Most active project this week: from the recent sessions we already fetched
-    week_projects: dict[str, int] = defaultdict(int)
-    for s in recent:
-        ts = s.get("first_timestamp", "") or ""
-        if ts[:10] >= week_start_str:
-            proj = s.get("project", "")
-            if proj:
-                week_projects[proj] += 1
-    most_active = max(week_projects, key=week_projects.get) if week_projects else ""
-
-    # Last session: single doc read
     last_session_id = u.get("last_session_id", "")
     last_session = get_session(last_session_id) if last_session_id else None
-
-    total_sessions = u.get("total_sessions", 0)
-    total_messages = u.get("total_messages", 0)
-
-    return {
-        "user": username,
-        "total_sessions": total_sessions,
-        "avg_messages_per_session": round(total_messages / total_sessions) if total_sessions else 0,
-        "last_session": last_session,
-        "week_stats": {
-            "sessions": week_sessions,
-            "sessions_prev_week": prev_week_sessions,
-            "messages": week_messages,
-            "avg_duration_seconds": round(week_duration / week_sessions) if week_sessions else 0,
-            "total_duration_seconds": round(week_duration),
-            "active_days": week_active_days,
-            "most_active_project": most_active,
-        },
-        "heatmap": heatmap_list,
-        "tool_usage": dict(sorted(u.get("tool_usage", {}).items(), key=lambda x: -x[1])),
-        "project_usage": dict(sorted(u.get("project_usage", {}).items(), key=lambda x: -x[1])),
-        "recent_sessions": recent[:10],
-    }
+    return stats.build_user_stats(username, u, recent, last_session)
 
 
 def get_stats() -> dict:
@@ -585,30 +418,19 @@ def get_stats() -> dict:
 
 def _compute_stats() -> dict:
     """Read from global counter + user counters + limited query. No full scan."""
-    from datetime import timedelta
-
     counters = _db().collection("counters")
-    empty = {
-        "total_sessions": 0, "total_messages": 0, "total_tool_uses": 0,
-        "unique_users": 0, "unique_projects": 0, "avg_duration_seconds": 0,
-        "active_this_week": 0, "users": [], "projects": [],
-        "tool_usage": {}, "timeline": [], "user_stats": {},
-        "project_stats": {}, "recent_sessions": [],
-    }
 
     # Read 4 split counter docs
     refs = [counters.document(n) for n in ("global", "global:daily", "global:users", "global:projects")]
     docs = {doc.id: doc.to_dict() for doc in _db().get_all(refs) if doc.exists}
     g = docs.get("global")
     if not g:
-        return empty
+        return stats.build_global_stats(None, {}, {}, {}, {}, [])
 
     users_map = docs.get("global:users", {})
-    projects_map = docs.get("global:projects", {})
-    daily_map = docs.get("global:daily", {})
 
     # Batch-read user counters for enrichment (top_project, active_days_this_week)
-    user_refs = [_db().collection("counters").document(f"user:{u}") for u in users_map]
+    user_refs = [counters.document(f"user:{u}") for u in users_map]
     user_counters = {}
     if user_refs:
         for udoc in _db().get_all(user_refs):
@@ -617,77 +439,11 @@ def _compute_stats() -> dict:
                 uname = udoc.id.split(":", 1)[1] if ":" in udoc.id else udoc.id
                 user_counters[uname] = udoc.to_dict()
 
-    today = datetime.now(timezone.utc).date()
-    week_start_str = (today - timedelta(days=today.weekday())).isoformat()
-
-    # Build user_stats from global users map + user counters
-    user_stats = {}
-    active_this_week = 0
-    for username, info in users_map.items():
-        sessions = info.get("sessions", 0)
-        dur = info.get("total_duration_seconds", 0)
-
-        uc = user_counters.get(username, {})
-        project_usage = uc.get("project_usage", {})
-        udaily = uc.get("daily", {})
-
-        top_project = max(project_usage, key=project_usage.get) if project_usage else ""
-        week_days = sum(
-            1 for d, v in udaily.items()
-            if d >= week_start_str and isinstance(v, dict) and v.get("s", 0) > 0
-        )
-        if week_days > 0:
-            active_this_week += 1
-
-        user_stats[username] = {
-            "sessions": sessions,
-            "messages": info.get("messages", 0),
-            "tool_uses": info.get("tool_uses", 0),
-            "last_active": info.get("last_active", ""),
-            "avg_duration_seconds": round(dur / sessions) if sessions else 0,
-            "top_project": top_project,
-            "active_days_this_week": week_days,
-        }
-
-    sorted_user_stats = dict(sorted(user_stats.items(), key=lambda x: -x[1]["sessions"]))
-
-    # Build project_stats from global projects map
-    project_stats = {}
-    for name, info in projects_map.items():
-        project_stats[name] = {
-            "sessions": info.get("sessions", 0),
-            "messages": info.get("messages", 0),
-            "users": sorted(info.get("users", [])),
-        }
-    sorted_project_stats = dict(sorted(project_stats.items(), key=lambda x: -x[1]["sessions"])[:15])
-
-    # Timeline from daily map (last 30 days)
-    timeline = []
-    for i in range(29, -1, -1):
-        day = (today - timedelta(days=i)).isoformat()
-        timeline.append({"date": day, "count": daily_map.get(day, 0)})
-
-    # Recent sessions: limit query (~10 doc reads)
-    recent_sessions = _recent_sessions(limit=10)
-
-    # Avg duration across all users
-    total_dur = sum(info.get("total_duration_seconds", 0) for info in users_map.values())
-    total_sess = g.get("total_sessions", 0)
-    avg_duration = round(total_dur / total_sess) if total_sess else 0
-
-    return {
-        "total_sessions": total_sess,
-        "total_messages": g.get("total_messages", 0),
-        "total_tool_uses": g.get("total_tool_uses", 0),
-        "unique_users": len(users_map),
-        "unique_projects": len(projects_map),
-        "avg_duration_seconds": avg_duration,
-        "active_this_week": active_this_week,
-        "users": sorted(users_map.keys()),
-        "projects": sorted(projects_map.keys()),
-        "tool_usage": dict(sorted(g.get("tool_usage", {}).items(), key=lambda x: -x[1])),
-        "timeline": timeline,
-        "user_stats": sorted_user_stats,
-        "project_stats": sorted_project_stats,
-        "recent_sessions": recent_sessions,
-    }
+    return stats.build_global_stats(
+        g,
+        users_map,
+        docs.get("global:projects", {}),
+        docs.get("global:daily", {}),
+        user_counters,
+        _recent_sessions(limit=10),
+    )

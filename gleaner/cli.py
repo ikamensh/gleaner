@@ -122,6 +122,49 @@ def cmd_auth(args):
         print("Could not verify — check the token")
 
 
+def cmd_serve(args):
+    if not args.no_collect:
+        from gleaner.vault import collect
+
+        added = collect()
+        if added:
+            print(f"Collected {added} new sessions")
+
+    import uvicorn
+
+    os.environ["GLEANER_LOCAL"] = "1"
+    print(f"Starting local dashboard at http://127.0.0.1:{args.port}")
+    uvicorn.run("server.server:app", host="127.0.0.1", port=args.port)
+
+
+def cmd_collect(args):
+    from gleaner.vault import VAULT_DIR, collect
+
+    added = collect()
+    index = VAULT_DIR / "index.parquet"
+    total = 0
+    if index.exists():
+        import pyarrow.parquet as pq
+
+        total = pq.read_metadata(index).num_rows
+    if added:
+        print(f"Collected {added} new sessions (total: {total})")
+    else:
+        print(f"Up to date ({total} sessions)")
+
+
+def cmd_backfill(args):
+    from gleaner.backfill import run
+
+    run(dry_run=args.dry_run, project=args.project, force=args.force, source=args.source)
+
+
+def cmd_pull(args):
+    from gleaner.pull import run
+
+    run(output=args.output, transcripts=args.transcripts, workers=args.workers)
+
+
 def main():
     parser = argparse.ArgumentParser(prog="gleaner", description="Gleaner CLI")
     sub = parser.add_subparsers(dest="command")
@@ -164,51 +207,18 @@ def main():
         parser.print_help()
         sys.exit(0)
 
-    commands: dict = {
+    commands = {
         "setup": cmd_setup,
         "status": cmd_status,
         "on": cmd_on,
         "off": cmd_off,
         "auth": cmd_auth,
+        "serve": cmd_serve,
+        "collect": cmd_collect,
+        "backfill": cmd_backfill,
+        "pull": cmd_pull,
     }
-
-    if args.command == "serve":
-        if not args.no_collect:
-            from gleaner.vault import collect
-            added = collect()
-            if added:
-                print(f"Collected {added} new sessions")
-
-        import uvicorn
-        os.environ["GLEANER_LOCAL"] = "1"
-        print(f"Starting local dashboard at http://127.0.0.1:{args.port}")
-        uvicorn.run("server.server:app", host="127.0.0.1", port=args.port)
-        sys.exit(0)
-
-    elif args.command == "collect":
-        from gleaner.vault import VAULT_DIR, collect
-
-        added = collect()
-        index = VAULT_DIR / "index.parquet"
-        total = 0
-        if index.exists():
-            import pyarrow.parquet as pq
-
-            total = pq.read_metadata(index).num_rows
-        if added:
-            print(f"Collected {added} new sessions (total: {total})")
-        else:
-            print(f"Up to date ({total} sessions)")
-    elif args.command == "backfill":
-        from gleaner.backfill import run
-
-        run(dry_run=args.dry_run, project=args.project, force=args.force, source=args.source)
-    elif args.command == "pull":
-        from gleaner.pull import run as pull_run
-
-        pull_run(output=args.output, transcripts=args.transcripts, workers=args.workers)
-    else:
-        commands[args.command](args)
+    commands[args.command](args)
 
 
 if __name__ == "__main__":

@@ -2,6 +2,9 @@
 
 Provides the same interface as db.py with realistic sample data pre-loaded.
 Activate by setting GLEANER_MOCK=1 before starting the server.
+
+Counter updates and stats assembly are shared with the cloud backend via
+backend.stats, so the mock stays behavior-identical to production.
 """
 
 import gzip
@@ -9,6 +12,8 @@ import hashlib
 import json
 import secrets
 from datetime import datetime, timedelta, timezone
+
+from backend import stats
 
 # --- In-memory stores ---
 _tokens: dict[str, dict] = {}  # hash -> token data
@@ -150,106 +155,10 @@ def _seed():
         ]
         _transcripts[sid] = gzip.compress("\n".join(transcript_lines).encode())
 
-    _build_counters()
-
-
-def _build_counters():
-    """Build counter docs from all sessions (mirrors backfill)."""
-    g = {
-        "total_sessions": 0, "total_messages": 0, "total_tool_uses": 0,
-        "tool_usage": {}, "daily": {}, "users": {}, "projects": {},
-    }
-    ucs: dict[str, dict] = {}
-
-    for sid, data in _sessions.items():
-        username = data.get("provenance", {}).get("user", "")
-        project = data.get("project", "")
-        msg_count = data.get("message_count", 0)
-        tool_count = data.get("tool_use_count", 0)
-        first_ts = data.get("first_timestamp", "")
-        last_ts = data.get("last_timestamp", "")
-        date_str = first_ts[:10] if len(first_ts) >= 10 else ""
-
-        duration = 0.0
-        if first_ts and last_ts:
-            try:
-                s = datetime.fromisoformat(first_ts.replace("Z", "+00:00"))
-                e = datetime.fromisoformat(last_ts.replace("Z", "+00:00"))
-                duration = (e - s).total_seconds()
-            except (ValueError, AttributeError):
-                pass
-
-        g["total_sessions"] += 1
-        g["total_messages"] += msg_count
-        g["total_tool_uses"] += tool_count
-
-        for tool, count in data.get("tool_counts", {}).items():
-            g["tool_usage"][tool] = g["tool_usage"].get(tool, 0) + count
-
-        if date_str:
-            g["daily"][date_str] = g["daily"].get(date_str, 0) + 1
-
-        if username:
-            if username not in g["users"]:
-                g["users"][username] = {
-                    "sessions": 0, "messages": 0, "tool_uses": 0,
-                    "total_duration_seconds": 0.0, "last_active": "",
-                }
-            gu = g["users"][username]
-            gu["sessions"] += 1
-            gu["messages"] += msg_count
-            gu["tool_uses"] += tool_count
-            gu["total_duration_seconds"] += duration
-            if first_ts and first_ts > gu["last_active"]:
-                gu["last_active"] = first_ts
-
-        if project:
-            if project not in g["projects"]:
-                g["projects"][project] = {"sessions": 0, "messages": 0, "users": []}
-            gp = g["projects"][project]
-            gp["sessions"] += 1
-            gp["messages"] += msg_count
-            if username and username not in gp["users"]:
-                gp["users"].append(username)
-
-        if username:
-            if username not in ucs:
-                ucs[username] = {
-                    "total_sessions": 0, "total_messages": 0, "total_tool_uses": 0,
-                    "total_duration_seconds": 0.0, "tool_usage": {}, "project_usage": {},
-                    "daily": {}, "last_session_id": "", "last_active": "",
-                }
-            u = ucs[username]
-            u["total_sessions"] += 1
-            u["total_messages"] += msg_count
-            u["total_tool_uses"] += tool_count
-            u["total_duration_seconds"] += duration
-            if first_ts and first_ts > u["last_active"]:
-                u["last_session_id"] = sid
-                u["last_active"] = first_ts
-            for tool, count in data.get("tool_counts", {}).items():
-                u["tool_usage"][tool] = u["tool_usage"].get(tool, 0) + count
-            if project:
-                u["project_usage"][project] = u["project_usage"].get(project, 0) + 1
-            if date_str:
-                if date_str not in u["daily"]:
-                    u["daily"][date_str] = {"s": 0, "m": 0, "d": 0.0}
-                u["daily"][date_str]["s"] += 1
-                u["daily"][date_str]["m"] += msg_count
-                u["daily"][date_str]["d"] += duration
-
-    # Split global counter into 4 docs (mirrors Firestore split)
-    _counters["global"] = {
-        "total_sessions": g["total_sessions"],
-        "total_messages": g["total_messages"],
-        "total_tool_uses": g["total_tool_uses"],
-        "tool_usage": g["tool_usage"],
-    }
-    _counters["global:daily"] = g["daily"]
-    _counters["global:users"] = g["users"]
-    _counters["global:projects"] = g["projects"]
-    for username, counter in ucs.items():
-        _counters[f"user:{username}"] = counter
+    # Replay the sessions through the same counter updates an upload would
+    # trigger, oldest first so last_active/last_session_id land on the newest.
+    for sid, data in sorted(_sessions.items(), key=lambda kv: kv[1]["first_timestamp"]):
+        _update_mock_counters(sid, data, data["provenance"])
 
 
 # --- Token functions ---
@@ -259,19 +168,22 @@ def _token_hash(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
 
-def create_token(name: str, issued_to: str = "", notes: str = "") -> str:
+def _store_new_token(fields: dict) -> str:
+    """Mint a token, store its record, and return the raw token (shown once)."""
     token = f"gl_{secrets.token_urlsafe(32)}"
     _tokens[_token_hash(token)] = {
-        "name": name,
-        "issued_to": issued_to,
-        "notes": notes,
         "prefix": token[:8],
         "active": True,
         "created_at": datetime.now(timezone.utc),
         "last_used_at": None,
         "usage_count": 0,
+        **fields,
     }
     return token
+
+
+def create_token(name: str, issued_to: str = "", notes: str = "") -> str:
+    return _store_new_token({"name": name, "issued_to": issued_to, "notes": notes})
 
 
 def validate_token(token: str) -> dict | None:
@@ -337,19 +249,12 @@ def list_user_tokens(owner_email: str) -> list[dict]:
 
 
 def create_user_token(username: str, owner_email: str, token_name: str = "") -> str:
-    token = f"gl_{secrets.token_urlsafe(32)}"
-    _tokens[_token_hash(token)] = {
+    return _store_new_token({
         "name": username,
         "issued_to": owner_email,
         "owner_email": owner_email,
         "notes": token_name or "Dashboard",
-        "prefix": token[:8],
-        "active": True,
-        "created_at": datetime.now(timezone.utc),
-        "last_used_at": None,
-        "usage_count": 0,
-    }
-    return token
+    })
 
 
 def revoke_user_token(id_or_prefix: str, owner_email: str) -> bool:
@@ -373,89 +278,8 @@ def export_firestore() -> dict:
 
 
 def _update_mock_counters(session_id: str, metadata: dict, provenance: dict):
-    """Incrementally update in-memory counter docs (mirrors db._update_counters)."""
-    username = provenance.get("user", "")
-    project = metadata.get("project", "")
-    msg_count = metadata.get("message_count", 0)
-    tool_count = metadata.get("tool_use_count", 0)
-    first_ts = metadata.get("first_timestamp", "")
-    last_ts = metadata.get("last_timestamp", "")
-    date_str = first_ts[:10] if len(first_ts) >= 10 else ""
-
-    duration = 0.0
-    if first_ts and last_ts:
-        try:
-            s = datetime.fromisoformat(first_ts.replace("Z", "+00:00"))
-            e = datetime.fromisoformat(last_ts.replace("Z", "+00:00"))
-            duration = (e - s).total_seconds()
-        except (ValueError, AttributeError):
-            pass
-
-    # Split global counter (mirrors Firestore split)
-    if "global" not in _counters:
-        _counters["global"] = {"total_sessions": 0, "total_messages": 0, "total_tool_uses": 0, "tool_usage": {}}
-        _counters["global:daily"] = {}
-        _counters["global:users"] = {}
-        _counters["global:projects"] = {}
-    g = _counters["global"]
-    g["total_sessions"] += 1
-    g["total_messages"] += msg_count
-    g["total_tool_uses"] += tool_count
-    for tool, count in metadata.get("tool_counts", {}).items():
-        g["tool_usage"][tool] = g["tool_usage"].get(tool, 0) + count
-    if date_str:
-        daily = _counters["global:daily"]
-        daily[date_str] = daily.get(date_str, 0) + 1
-    if username:
-        users = _counters["global:users"]
-        if username not in users:
-            users[username] = {
-                "sessions": 0, "messages": 0, "tool_uses": 0,
-                "total_duration_seconds": 0.0, "last_active": "",
-            }
-        gu = users[username]
-        gu["sessions"] += 1
-        gu["messages"] += msg_count
-        gu["tool_uses"] += tool_count
-        gu["total_duration_seconds"] += duration
-        if first_ts:
-            gu["last_active"] = first_ts
-    if project:
-        projects = _counters["global:projects"]
-        if project not in projects:
-            projects[project] = {"sessions": 0, "messages": 0, "users": []}
-        gp = projects[project]
-        gp["sessions"] += 1
-        gp["messages"] += msg_count
-        if username and username not in gp["users"]:
-            gp["users"].append(username)
-
-    if username:
-        key = f"user:{username}"
-        if key not in _counters:
-            _counters[key] = {
-                "total_sessions": 0, "total_messages": 0, "total_tool_uses": 0,
-                "total_duration_seconds": 0.0, "tool_usage": {}, "project_usage": {},
-                "daily": {}, "last_session_id": "", "last_active": "",
-            }
-        u = _counters[key]
-        u["total_sessions"] += 1
-        u["total_messages"] += msg_count
-        u["total_tool_uses"] += tool_count
-        u["total_duration_seconds"] += duration
-        u["last_session_id"] = session_id
-        if first_ts:
-            u["last_active"] = first_ts
-        for tool, count in metadata.get("tool_counts", {}).items():
-            u["tool_usage"][tool] = u["tool_usage"].get(tool, 0) + count
-        if project:
-            u["project_usage"][project] = u["project_usage"].get(project, 0) + 1
-        if date_str:
-            if date_str not in u["daily"]:
-                u["daily"][date_str] = {"s": 0, "m": 0, "d": 0.0}
-            u["daily"][date_str]["s"] += 1
-            u["daily"][date_str]["m"] += msg_count
-            u["daily"][date_str]["d"] += duration
+    """Apply the shared counter deltas to the in-memory counter docs."""
+    stats.apply_deltas(_counters, stats.counter_deltas(session_id, metadata, provenance))
 
 
 def _recent_sessions(user: str | None = None, limit: int = 10) -> list[dict]:
@@ -466,23 +290,7 @@ def _recent_sessions(user: str | None = None, limit: int = 10) -> list[dict]:
     )
     if user:
         results = [s for s in results if s.get("provenance", {}).get("user") == user]
-    results = results[:limit]
-    return [
-        {
-            "session_id": s.get("session_id", ""),
-            "topic": s.get("topic", ""),
-            "project": s.get("project", ""),
-            "cwd": s.get("cwd", ""),
-            "user": s.get("provenance", {}).get("user", ""),
-            "message_count": s.get("message_count", 0),
-            "tool_use_count": s.get("tool_use_count", 0),
-            "first_timestamp": s.get("first_timestamp"),
-            "last_timestamp": s.get("last_timestamp"),
-            "provenance": s.get("provenance", {}),
-            "transcript_size": s.get("transcript_size", 0),
-        }
-        for s in results
-    ]
+    return [stats.session_summary(s) for s in results[:limit]]
 
 
 def store_session(
@@ -556,179 +364,30 @@ def list_sessions(
 
 def get_user_stats(username: str) -> dict:
     """Personal stats from counter doc — mirrors db.get_user_stats."""
-    from collections import defaultdict
-
-    now = datetime.now(timezone.utc)
-    today = now.date()
-    week_start = today - timedelta(days=today.weekday())
-    prev_week_start = week_start - timedelta(days=7)
-    heatmap_start = (today.replace(day=1) - timedelta(days=90)).replace(day=1)
-    week_start_str = week_start.isoformat()
-    prev_week_start_str = prev_week_start.isoformat()
-
     u = _counters.get(f"user:{username}")
     if not u:
-        return {
-            "user": username, "total_sessions": 0, "avg_messages_per_session": 0,
-            "last_session": None, "week_stats": {
-                "sessions": 0, "sessions_prev_week": 0, "messages": 0,
-                "avg_duration_seconds": 0, "total_duration_seconds": 0,
-                "active_days": 0, "most_active_project": "",
-            },
-            "heatmap": [], "tool_usage": {}, "project_usage": {}, "recent_sessions": [],
-        }
-
-    daily = u.get("daily", {})
-
-    week_sessions = 0
-    week_messages = 0
-    week_duration = 0.0
-    week_active_days = 0
-    prev_week_sessions = 0
-    for date_str, day_data in daily.items():
-        if not isinstance(day_data, dict):
-            continue
-        if date_str >= week_start_str:
-            s = day_data.get("s", 0)
-            week_sessions += s
-            week_messages += day_data.get("m", 0)
-            week_duration += day_data.get("d", 0)
-            if s > 0:
-                week_active_days += 1
-        elif date_str >= prev_week_start_str:
-            prev_week_sessions += day_data.get("s", 0)
-
-    heatmap_list = []
-    d = heatmap_start
-    while d <= today:
-        ds = d.isoformat()
-        day_data = daily.get(ds, {})
-        count = day_data.get("s", 0) if isinstance(day_data, dict) else 0
-        heatmap_list.append({"date": ds, "count": count})
-        d += timedelta(days=1)
-
+        return stats.build_user_stats(username, None, [], None)
     recent = _recent_sessions(user=username, limit=20)
-
-    week_projects: dict[str, int] = defaultdict(int)
-    for s in recent:
-        ts = s.get("first_timestamp", "") or ""
-        if ts[:10] >= week_start_str:
-            proj = s.get("project", "")
-            if proj:
-                week_projects[proj] += 1
-    most_active = max(week_projects, key=week_projects.get) if week_projects else ""
-
     last_sid = u.get("last_session_id", "")
     last_session = get_session(last_sid) if last_sid else None
-
-    total_sessions = u.get("total_sessions", 0)
-    total_messages = u.get("total_messages", 0)
-
-    return {
-        "user": username,
-        "total_sessions": total_sessions,
-        "avg_messages_per_session": round(total_messages / total_sessions) if total_sessions else 0,
-        "last_session": last_session,
-        "week_stats": {
-            "sessions": week_sessions,
-            "sessions_prev_week": prev_week_sessions,
-            "messages": week_messages,
-            "avg_duration_seconds": round(week_duration / week_sessions) if week_sessions else 0,
-            "total_duration_seconds": round(week_duration),
-            "active_days": week_active_days,
-            "most_active_project": most_active,
-        },
-        "heatmap": heatmap_list,
-        "tool_usage": dict(sorted(u.get("tool_usage", {}).items(), key=lambda x: -x[1])),
-        "project_usage": dict(sorted(u.get("project_usage", {}).items(), key=lambda x: -x[1])),
-        "recent_sessions": recent[:10],
-    }
+    return stats.build_user_stats(username, u, recent, last_session)
 
 
 def get_stats() -> dict:
-    """Aggregate stats from counter doc — mirrors db.get_stats."""
-    g = _counters.get("global")
-    if not g:
-        return {
-            "total_sessions": 0, "total_messages": 0, "total_tool_uses": 0,
-            "unique_users": 0, "unique_projects": 0, "avg_duration_seconds": 0,
-            "active_this_week": 0, "users": [], "projects": [],
-            "tool_usage": {}, "timeline": [], "user_stats": {},
-            "project_stats": {}, "recent_sessions": [],
-        }
-
-    users_map = _counters.get("global:users", {})
-    projects_map = _counters.get("global:projects", {})
-    daily_map = _counters.get("global:daily", {})
-
-    today = datetime.now(timezone.utc).date()
-    week_start_str = (today - timedelta(days=today.weekday())).isoformat()
-
-    user_stats = {}
-    active_this_week = 0
-    for username, info in users_map.items():
-        sessions = info.get("sessions", 0)
-        dur = info.get("total_duration_seconds", 0)
-
-        uc = _counters.get(f"user:{username}", {})
-        project_usage = uc.get("project_usage", {})
-        udaily = uc.get("daily", {})
-
-        top_project = max(project_usage, key=project_usage.get) if project_usage else ""
-        week_days = sum(
-            1 for d, v in udaily.items()
-            if d >= week_start_str and isinstance(v, dict) and v.get("s", 0) > 0
-        )
-        if week_days > 0:
-            active_this_week += 1
-
-        user_stats[username] = {
-            "sessions": sessions,
-            "messages": info.get("messages", 0),
-            "tool_uses": info.get("tool_uses", 0),
-            "last_active": info.get("last_active", ""),
-            "avg_duration_seconds": round(dur / sessions) if sessions else 0,
-            "top_project": top_project,
-            "active_days_this_week": week_days,
-        }
-
-    sorted_user_stats = dict(sorted(user_stats.items(), key=lambda x: -x[1]["sessions"]))
-
-    project_stats = {}
-    for name, info in projects_map.items():
-        project_stats[name] = {
-            "sessions": info.get("sessions", 0),
-            "messages": info.get("messages", 0),
-            "users": sorted(info.get("users", [])),
-        }
-    sorted_project_stats = dict(sorted(project_stats.items(), key=lambda x: -x[1]["sessions"])[:15])
-
-    timeline = []
-    for i in range(29, -1, -1):
-        day = (today - timedelta(days=i)).isoformat()
-        timeline.append({"date": day, "count": daily_map.get(day, 0)})
-
-    recent_sessions = _recent_sessions(limit=10)
-
-    total_dur = sum(info.get("total_duration_seconds", 0) for info in users_map.values())
-    total_sess = g.get("total_sessions", 0)
-
-    return {
-        "total_sessions": total_sess,
-        "total_messages": g.get("total_messages", 0),
-        "total_tool_uses": g.get("total_tool_uses", 0),
-        "unique_users": len(users_map),
-        "unique_projects": len(projects_map),
-        "avg_duration_seconds": round(total_dur / total_sess) if total_sess else 0,
-        "active_this_week": active_this_week,
-        "users": sorted(users_map.keys()),
-        "projects": sorted(projects_map.keys()),
-        "tool_usage": dict(sorted(g.get("tool_usage", {}).items(), key=lambda x: -x[1])),
-        "timeline": timeline,
-        "user_stats": sorted_user_stats,
-        "project_stats": sorted_project_stats,
-        "recent_sessions": recent_sessions,
+    """Aggregate stats from counter docs — mirrors db.get_stats."""
+    user_counters = {
+        key.split(":", 1)[1]: counter
+        for key, counter in _counters.items()
+        if key.startswith("user:")
     }
+    return stats.build_global_stats(
+        _counters.get("global"),
+        _counters.get("global:users", {}),
+        _counters.get("global:projects", {}),
+        _counters.get("global:daily", {}),
+        user_counters,
+        _recent_sessions(limit=10),
+    )
 
 
 # Seed on import

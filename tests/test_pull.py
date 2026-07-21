@@ -9,7 +9,7 @@ import json
 import pyarrow.parquet as pq
 import pytest
 
-from gleaner.pull import _flatten_session, _load_latest_timestamp, _merge_parquet, _save_parquet
+from gleaner.pull import _flatten_session, _load_latest_timestamp, _upsert_parquet
 from gleaner.enrich import tag_session
 
 
@@ -71,7 +71,7 @@ class TestParquetRoundTrip:
     def test_save_and_reload(self, tmp_path):
         sessions = [_make_session(f"s{i}", uploaded_at=f"2026-03-2{i}T10:00:00+00:00") for i in range(3)]
         path = tmp_path / "sessions.parquet"
-        _save_parquet(sessions, path)
+        _upsert_parquet(path, sessions)
 
         table = pq.read_table(path)
         assert table.num_rows == 3
@@ -85,7 +85,7 @@ class TestParquetRoundTrip:
             _make_session("s3", uploaded_at="2026-03-21T10:00:00+00:00"),
         ]
         path = tmp_path / "sessions.parquet"
-        _save_parquet(sessions, path)
+        _upsert_parquet(path, sessions)
 
         latest = _load_latest_timestamp(path)
         assert latest == "2026-03-22T10:00:00+00:00"
@@ -93,26 +93,26 @@ class TestParquetRoundTrip:
     def test_merge_deduplicates(self, tmp_path):
         """Merging sessions that already exist locally doesn't create duplicates."""
         path = tmp_path / "sessions.parquet"
-        _save_parquet([_make_session("s1"), _make_session("s2")], path)
+        _upsert_parquet(path, [_make_session("s1"), _make_session("s2")])
 
         # "New" batch includes s2 (already exists) and s3 (truly new)
         new = [_make_session("s2"), _make_session("s3")]
-        total, added = _merge_parquet(path, new)
+        total, added = _upsert_parquet(path, new)
         assert added == 1
         assert total == 3
 
     def test_merge_no_new_sessions(self, tmp_path):
         path = tmp_path / "sessions.parquet"
-        _save_parquet([_make_session("s1")], path)
+        _upsert_parquet(path, [_make_session("s1")])
 
-        total, added = _merge_parquet(path, [_make_session("s1")])
+        total, added = _upsert_parquet(path, [_make_session("s1")])
         assert added == 0
         assert total == 1
 
     def test_all_columns_present(self, tmp_path):
         """Saved Parquet contains all expected columns."""
         path = tmp_path / "sessions.parquet"
-        _save_parquet([_make_session("s1")], path)
+        _upsert_parquet(path, [_make_session("s1")])
         table = pq.read_table(path)
         expected = {
             "session_id", "user", "host", "platform", "project", "topic",
