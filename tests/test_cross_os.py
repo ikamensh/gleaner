@@ -29,6 +29,7 @@ import pytest
 
 import gleaner.setup.installers as installers
 import gleaner.setup.sync_agent as sync_agent
+from conftest import FakeScheduler
 
 DEAD_URL = "http://127.0.0.1:9"  # connection refused instantly; whoami returns None
 
@@ -193,30 +194,6 @@ class TestHookCommandsResolvable:
         assert path.exists(), f"hook command does not exist: {path}"
 
 
-class _FakeScheduler:
-    """Records scheduler commands instead of running them; emulates enough
-    schtasks state (create/query/delete by /TN) for lifecycle tests."""
-
-    def __init__(self):
-        self.calls: list[tuple[str, ...]] = []
-        self.tasks: set[str] = set()
-
-    def __call__(self, *argv: str) -> bool:
-        self.calls.append(argv)
-        if argv[0] != "schtasks":
-            return True
-        action, name = argv[1], argv[argv.index("/TN") + 1]
-        if action == "/Query":
-            return name in self.tasks
-        if action == "/Create":
-            self.tasks.add(name)
-            return True
-        if action == "/Delete":
-            self.tasks.discard(name)
-            return True
-        return True
-
-
 @pytest.fixture
 def unit_home(tmp_path, monkeypatch):
     """In-process fake home + name seam, scheduler commands stubbed.
@@ -227,7 +204,7 @@ def unit_home(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("USERPROFILE", str(tmp_path))
     monkeypatch.setenv("GLEANER_SYNC_NAME", "com.gleaner.unittest")
-    fake = _FakeScheduler()
+    fake = FakeScheduler()
     monkeypatch.setattr(sync_agent, "_run_quiet", fake)
     return tmp_path, fake
 

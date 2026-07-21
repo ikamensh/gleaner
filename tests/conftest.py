@@ -14,6 +14,31 @@ os.environ["GLEANER_MOCK"] = "1"
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 
+class FakeScheduler:
+    """Stands in for sync_agent._run_quiet: records scheduler commands
+    instead of running them, and emulates enough schtasks state
+    (create/query/delete by /TN) for lifecycle tests on Windows."""
+
+    def __init__(self):
+        self.calls: list[tuple[str, ...]] = []
+        self.tasks: set[str] = set()
+
+    def __call__(self, *argv: str) -> bool:
+        self.calls.append(argv)
+        if argv[0] != "schtasks":
+            return True
+        action, name = argv[1], argv[argv.index("/TN") + 1]
+        if action == "/Query":
+            return name in self.tasks
+        if action == "/Create":
+            self.tasks.add(name)
+            return True
+        if action == "/Delete":
+            self.tasks.discard(name)
+            return True
+        return True
+
+
 @pytest.fixture
 def tmp_jsonl(tmp_path):
     """Create a temporary JSONL transcript file with configurable messages."""

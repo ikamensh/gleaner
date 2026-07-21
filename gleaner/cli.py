@@ -219,6 +219,12 @@ def cmd_collect(args):
         print(f"Up to date ({total} sessions)")
 
 
+def cmd_tray(args):
+    from gleaner.tray import main as tray_main
+
+    tray_main([args.tray_action])
+
+
 def cmd_backfill(args):
     from gleaner.backfill import run
 
@@ -275,6 +281,15 @@ def main():
 
     sub.add_parser("collect", help="Collect local IDE sessions into the vault")
 
+    p = sub.add_parser("tray", help="Menu bar / system tray app (status + on/off)")
+    p.add_argument(
+        "tray_action",
+        nargs="?",
+        choices=["run", "install", "uninstall"],
+        default="run",
+        help="run (default), install/uninstall start-at-login",
+    )
+
     p = sub.add_parser("serve", help="Start local dashboard")
     p.add_argument("--port", type=int, default=8765, help="Port (default: 8765)")
     p.add_argument("--no-collect", action="store_true", help="Skip session collection on startup")
@@ -296,6 +311,7 @@ def main():
         "off": cmd_off,
         "auth": cmd_auth,
         "remote": cmd_remote,
+        "tray": cmd_tray,
         "serve": cmd_serve,
         "collect": cmd_collect,
         "backfill": cmd_backfill,
