@@ -1,7 +1,7 @@
 """Local vault for coding sessions.
 
-Copies sessions from Claude Code and Cursor into a unified format.
-Each session keeps the raw original alongside a normalized transcript.
+Copies sessions from every local source into a unified format. Each
+session keeps the raw original alongside a normalized transcript.
 
 Layout:
     ~/.gleaner/
@@ -21,14 +21,9 @@ import shutil
 import sys
 from pathlib import Path
 
-from gleaner.codex import (
-    _CODEX_LINE_TYPES,
-    _codex_content_to_canonical,
-    _codex_tool_name,
-    parse_codex_transcript,
-)
-from gleaner.schema import NormalizedEntry, SessionMeta
-from gleaner.upload import CLAUDE_DIR, collect_provenance, parse_transcript
+from gleaner.enrich import collect_provenance, tag_session
+from gleaner.sources import SOURCES, codex, parser_for_ide
+from gleaner.vault.schema import NormalizedEntry, SessionMeta
 
 VAULT_DIR = Path.home() / ".gleaner"
 
@@ -44,9 +39,9 @@ def _normalize_codex_entry(entry: dict) -> dict:
     payload = entry.get("payload", {})
     ptype = payload.get("type")
     if entry.get("type") == "response_item" and ptype == "message":
-        content = _codex_content_to_canonical(payload.get("content", []))
+        content = codex.content_to_canonical(payload.get("content", []))
         return NormalizedEntry(role=_role(payload.get("role")), ts=ts, content=content).model_dump()
-    if entry.get("type") == "response_item" and (name := _codex_tool_name(payload)):
+    if entry.get("type") == "response_item" and (name := codex.tool_name(payload)):
         return NormalizedEntry(
             role="unknown", ts=ts, content=[{"type": "tool_use", "name": name}]
         ).model_dump()
@@ -62,7 +57,7 @@ def normalize_entry(entry: dict) -> dict:
     Codex:       {"type": "response_item", "payload": {"role": ..., "content": [...]}}
     Output:      {"role": "user|assistant|unknown", "ts": "...|null", "content": [...]}
     """
-    if "payload" in entry and entry.get("type") in _CODEX_LINE_TYPES:
+    if "payload" in entry and entry.get("type") in codex.CODEX_LINE_TYPES:
         return _normalize_codex_entry(entry)
     role = _role(entry.get("type") or entry.get("role"))
     ts = entry.get("timestamp")
@@ -89,8 +84,7 @@ def ingest_session(
     if session_dir.exists():
         return None
 
-    parser = parse_codex_transcript if ide == "codex" else parse_transcript
-    meta = parser(raw_path)
+    meta = parser_for_ide(ide)(raw_path)
     if meta.pop("worthless", False):
         return None
 
@@ -107,8 +101,6 @@ def ingest_session(
                 f_out.write(json.dumps(normalize_entry(entry)) + "\n")
             except json.JSONDecodeError:
                 continue
-
-    from gleaner.tags import tag_session
 
     provenance = collect_provenance()
     tags = tag_session(project, meta.get("topic", ""), provenance["host"], cwd, ide=ide)
@@ -164,12 +156,10 @@ def update_index(new_rows: list[dict], vault_dir: Path = VAULT_DIR) -> int:
 
 
 def collect(vault_dir: Path = VAULT_DIR) -> int:
-    """Scan local IDE directories and ingest new sessions into the vault.
+    """Scan every local source and ingest new sessions into the vault.
 
     Returns number of sessions added.
     """
-    from gleaner.cursor import find_all_cursor_sessions
-
     vault_dir.mkdir(parents=True, exist_ok=True)
     sessions_dir = vault_dir / "sessions"
     existing = (
@@ -179,55 +169,18 @@ def collect(vault_dir: Path = VAULT_DIR) -> int:
     )
     new_rows = []
 
-    # Claude Code
-    projects_dir = CLAUDE_DIR / "projects"
-    if projects_dir.exists():
-        for project_dir in projects_dir.iterdir():
-            if not project_dir.is_dir():
+    for source in SOURCES.values():
+        for session_id, project_name, path in source.find(None):
+            if session_id in existing:
                 continue
-            for jsonl_file in project_dir.glob("*.jsonl"):
-                session_id = jsonl_file.stem
-                if session_id in existing:
-                    continue
-                try:
-                    row = ingest_session(
-                        session_id, jsonl_file, "claude_code", project_dir.name,
-                        vault_dir=vault_dir,
-                    )
-                    if row:
-                        new_rows.append(row)
-                except Exception as e:
-                    print(f"  {session_id[:12]}... skipped: {e}", file=sys.stderr)
-
-    # Cursor
-    for session_id, project_name, path in find_all_cursor_sessions():
-        if session_id in existing:
-            continue
-        try:
-            row = ingest_session(
-                session_id, path, "cursor", project_name,
-                vault_dir=vault_dir,
-            )
-            if row:
-                new_rows.append(row)
-        except Exception as e:
-            print(f"  {session_id[:12]}... skipped: {e}", file=sys.stderr)
-
-    # Codex
-    from gleaner.codex import find_all_codex_sessions
-
-    for session_id, project_name, path in find_all_codex_sessions():
-        if session_id in existing:
-            continue
-        try:
-            row = ingest_session(
-                session_id, path, "codex", project_name,
-                vault_dir=vault_dir,
-            )
-            if row:
-                new_rows.append(row)
-        except Exception as e:
-            print(f"  {session_id[:12]}... skipped: {e}", file=sys.stderr)
+            try:
+                row = ingest_session(
+                    session_id, path, source.ide, project_name, vault_dir=vault_dir
+                )
+                if row:
+                    new_rows.append(row)
+            except Exception as e:
+                print(f"  {session_id[:12]}... skipped: {e}", file=sys.stderr)
 
     added = update_index(new_rows, vault_dir=vault_dir)
     return added

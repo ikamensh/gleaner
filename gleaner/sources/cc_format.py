@@ -8,7 +8,7 @@ Usage::
 
     import json
     from pydantic import TypeAdapter
-    from gleaner.cc_format import ConversationEntry
+    from gleaner.sources.cc_format import ConversationEntry
 
     adapter = TypeAdapter(ConversationEntry)
     with open(path) as f:

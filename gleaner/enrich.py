@@ -1,8 +1,12 @@
-"""Session classification tags.
+"""Session enrichment: classification tags and uploader provenance.
 
-Derives `source` and `task_type` from session metadata. Used at upload
-time (stored in Firestore) and at pull time (added to Parquet).
+Derives `source` and `task_type` from session metadata, and collects
+who/where info about the uploading machine. Used at upload time (stored
+in Firestore), at pull time (added to Parquet), and at vault ingestion.
 """
+
+import getpass
+import platform
 
 # Kodo-generated topic patterns (these are kodo regardless of host/project)
 _KODO_TOPIC_TASKS = {
@@ -12,6 +16,15 @@ _KODO_TOPIC_TASKS = {
     "commit": lambda t: t.startswith("Review `git diff`") and "commit" in t.lower(),
     "analysis": lambda t: t.startswith("Analyze this project"),
 }
+
+
+def collect_provenance() -> dict:
+    """Auto-collect uploader info."""
+    return {
+        "user": getpass.getuser(),
+        "host": platform.node(),
+        "platform": f"{platform.system()} {platform.machine()}",
+    }
 
 
 def tag_session(

@@ -13,7 +13,7 @@ Claude Code / Cursor, so these tests pin down that:
 import json
 from pathlib import Path
 
-from gleaner.codex import (
+from gleaner.sources.codex import (
     _encode_project,
     find_all_codex_sessions,
     find_codex_session_file,
@@ -121,14 +121,14 @@ class TestParse:
 
 class TestDiscovery:
     def test_roundtrip_id_to_file(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gleaner.codex.SESSIONS_DIR", tmp_path)
+        monkeypatch.setattr("gleaner.sources.codex.SESSIONS_DIR", tmp_path)
         path = _write_rollout(tmp_path, FULL)
         sessions = find_all_codex_sessions()
         assert sessions == [(SID, _encode_project("/Users/me/code-republic/proj"), path)]
         assert find_codex_session_file(SID) == path
 
     def test_project_filter(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gleaner.codex.SESSIONS_DIR", tmp_path)
+        monkeypatch.setattr("gleaner.sources.codex.SESSIONS_DIR", tmp_path)
         _write_rollout(tmp_path, FULL)
         assert find_all_codex_sessions("code-republic")  # substring of encoded cwd
         assert find_all_codex_sessions("nonexistent") == []

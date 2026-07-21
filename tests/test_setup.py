@@ -1,22 +1,23 @@
-"""Tests for gleaner.config: config file I/O, hook management."""
+"""Tests for gleaner.setup: config file I/O, hook and agent installation."""
 
 import json
 import plistlib
 
 import pytest
 
-import gleaner.config as config
+import gleaner.setup.config as config
+import gleaner.setup.installers as installers
 
 
 @pytest.fixture(autouse=True)
 def isolated_paths(tmp_path, monkeypatch):
     """Redirect config and settings files to a temp directory."""
     monkeypatch.setattr(config, "CONFIG_FILE", tmp_path / "gleaner.json")
-    monkeypatch.setattr(config, "CLAUDE_SETTINGS", tmp_path / ".claude" / "settings.json")
-    monkeypatch.setattr(config, "CURSOR_HOOKS", tmp_path / ".cursor" / "hooks.json")
-    monkeypatch.setattr(config, "LAUNCHD_PLIST", tmp_path / "LaunchAgents" / f"{config.LAUNCHD_LABEL}.plist")
+    monkeypatch.setattr(installers, "CLAUDE_SETTINGS", tmp_path / ".claude" / "settings.json")
+    monkeypatch.setattr(installers, "CURSOR_HOOKS", tmp_path / ".cursor" / "hooks.json")
+    monkeypatch.setattr(installers, "LAUNCHD_PLIST", tmp_path / "LaunchAgents" / f"{installers.LAUNCHD_LABEL}.plist")
     # Stub out launchctl so tests don't touch the real system
-    monkeypatch.setattr(config.subprocess, "run", lambda *a, **kw: None)
+    monkeypatch.setattr(installers.subprocess, "run", lambda *a, **kw: None)
 
 
 class TestConfigRoundtrip:
@@ -80,45 +81,45 @@ class TestHookManagement:
 
     def test_install_on_empty(self):
         """Installing into a fresh settings.json works."""
-        assert config.install_hook() is True
-        assert config.is_hook_installed() is True
+        assert installers.install_hook() is True
+        assert installers.is_hook_installed() is True
 
     def test_install_is_idempotent(self):
         """Second install returns False and doesn't duplicate."""
-        config.install_hook()
-        assert config.install_hook() is False
-        settings = config.read_claude_settings()
+        installers.install_hook()
+        assert installers.install_hook() is False
+        settings = installers.read_claude_settings()
         assert len(settings["hooks"]["SessionEnd"]) == 1
 
     def test_remove(self):
-        config.install_hook()
-        assert config.remove_hook() is True
-        assert config.is_hook_installed() is False
+        installers.install_hook()
+        assert installers.remove_hook() is True
+        assert installers.is_hook_installed() is False
 
     def test_remove_when_not_installed(self):
-        assert config.remove_hook() is False
+        assert installers.remove_hook() is False
 
     def test_preserves_other_hooks(self):
         """Installing/removing gleaner doesn't affect other hooks."""
         other_hook = {"hooks": [{"type": "command", "command": "my-other-hook"}]}
         settings = {"hooks": {"SessionEnd": [other_hook], "PreToolUse": [{"hooks": []}]}}
-        config.write_claude_settings(settings)
+        installers.write_claude_settings(settings)
 
-        config.install_hook()
-        s = config.read_claude_settings()
+        installers.install_hook()
+        s = installers.read_claude_settings()
         assert len(s["hooks"]["SessionEnd"]) == 2  # other + gleaner
         assert "PreToolUse" in s["hooks"]
 
-        config.remove_hook()
-        s = config.read_claude_settings()
+        installers.remove_hook()
+        s = installers.read_claude_settings()
         assert len(s["hooks"]["SessionEnd"]) == 1  # only other remains
         assert s["hooks"]["SessionEnd"][0] == other_hook
 
     def test_install_remove_roundtrip(self):
         """Install then remove leaves no gleaner trace."""
-        config.install_hook()
-        config.remove_hook()
-        settings = config.read_claude_settings()
+        installers.install_hook()
+        installers.remove_hook()
+        settings = installers.read_claude_settings()
         assert settings["hooks"]["SessionEnd"] == []
 
 
@@ -126,30 +127,30 @@ class TestCursorHookManagement:
     """install_cursor_hook / remove_cursor_hook manage ~/.cursor/hooks.json."""
 
     def test_install_on_empty(self):
-        assert config.install_cursor_hook() is True
-        assert config.is_cursor_hook_installed() is True
+        assert installers.install_cursor_hook() is True
+        assert installers.is_cursor_hook_installed() is True
 
     def test_creates_valid_hooks_json(self):
         """Installed hooks.json has version and correct structure."""
-        config.install_cursor_hook()
-        cfg = config.read_cursor_hooks()
+        installers.install_cursor_hook()
+        cfg = installers.read_cursor_hooks()
         assert cfg["version"] == 1
         assert len(cfg["hooks"]["stop"]) == 1
         assert "gleaner" in cfg["hooks"]["stop"][0]["command"]
 
     def test_install_is_idempotent(self):
-        config.install_cursor_hook()
-        assert config.install_cursor_hook() is False
-        cfg = config.read_cursor_hooks()
+        installers.install_cursor_hook()
+        assert installers.install_cursor_hook() is False
+        cfg = installers.read_cursor_hooks()
         assert len(cfg["hooks"]["stop"]) == 1
 
     def test_remove(self):
-        config.install_cursor_hook()
-        assert config.remove_cursor_hook() is True
-        assert config.is_cursor_hook_installed() is False
+        installers.install_cursor_hook()
+        assert installers.remove_cursor_hook() is True
+        assert installers.is_cursor_hook_installed() is False
 
     def test_remove_when_not_installed(self):
-        assert config.remove_cursor_hook() is False
+        assert installers.remove_cursor_hook() is False
 
     def test_preserves_other_hooks(self):
         """Installing/removing gleaner doesn't affect other Cursor hooks."""
@@ -160,15 +161,15 @@ class TestCursorHookManagement:
                 "afterFileEdit": [{"command": "lint-hook"}],
             },
         }
-        config.write_cursor_hooks(cfg)
+        installers.write_cursor_hooks(cfg)
 
-        config.install_cursor_hook()
-        cfg = config.read_cursor_hooks()
+        installers.install_cursor_hook()
+        cfg = installers.read_cursor_hooks()
         assert len(cfg["hooks"]["stop"]) == 2
         assert "afterFileEdit" in cfg["hooks"]
 
-        config.remove_cursor_hook()
-        cfg = config.read_cursor_hooks()
+        installers.remove_cursor_hook()
+        cfg = installers.read_cursor_hooks()
         assert len(cfg["hooks"]["stop"]) == 1
         assert cfg["hooks"]["stop"][0]["command"] == "my-other-hook"
 
@@ -177,24 +178,24 @@ class TestBackfillAgent:
     """install_backfill_agent / remove_backfill_agent manage a launchd plist."""
 
     def test_install_creates_valid_plist(self):
-        assert config.install_backfill_agent() is True
-        assert config.LAUNCHD_PLIST.exists()
-        plist = plistlib.loads(config.LAUNCHD_PLIST.read_bytes())
-        assert plist["Label"] == config.LAUNCHD_LABEL
+        assert installers.install_backfill_agent() is True
+        assert installers.LAUNCHD_PLIST.exists()
+        plist = plistlib.loads(installers.LAUNCHD_PLIST.read_bytes())
+        assert plist["Label"] == installers.LAUNCHD_LABEL
         assert "--source" in plist["ProgramArguments"]
         assert "all" in plist["ProgramArguments"]
-        assert plist["StartInterval"] == config.BACKFILL_INTERVAL
+        assert plist["StartInterval"] == installers.BACKFILL_INTERVAL
         assert plist["RunAtLoad"] is True
 
     def test_install_is_idempotent(self):
-        config.install_backfill_agent()
-        assert config.install_backfill_agent() is False
+        installers.install_backfill_agent()
+        assert installers.install_backfill_agent() is False
 
     def test_remove(self):
-        config.install_backfill_agent()
-        assert config.remove_backfill_agent() is True
-        assert not config.LAUNCHD_PLIST.exists()
-        assert config.is_backfill_agent_installed() is False
+        installers.install_backfill_agent()
+        assert installers.remove_backfill_agent() is True
+        assert not installers.LAUNCHD_PLIST.exists()
+        assert installers.is_backfill_agent_installed() is False
 
     def test_remove_when_not_installed(self):
-        assert config.remove_backfill_agent() is False
+        assert installers.remove_backfill_agent() is False

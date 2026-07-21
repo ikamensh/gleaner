@@ -10,40 +10,29 @@ Usage:
 """
 
 import argparse
-import json
 import os
 import sys
-import urllib.request
 
-from gleaner.config import (
-    CLAUDE_SETTINGS,
+from gleaner.remote import GleanerClient
+from gleaner.setup.config import (
     CONFIG_FILE,
-    CURSOR_HOOKS,
     get_credentials,
+    read_config,
+    write_config,
+)
+from gleaner.setup.installers import (
+    CLAUDE_SETTINGS,
+    CURSOR_HOOKS,
     install_backfill_agent,
     install_cursor_hook,
     install_hook,
     is_backfill_agent_installed,
     is_cursor_hook_installed,
     is_hook_installed,
-    read_config,
     remove_backfill_agent,
     remove_cursor_hook,
     remove_hook,
-    write_config,
 )
-
-
-def _check_server(url: str, token: str) -> str | None:
-    """Verify connection. Returns username or None."""
-    try:
-        req = urllib.request.Request(f"{url.rstrip('/')}/api/me")
-        req.add_header("Authorization", f"Bearer {token}")
-        resp = urllib.request.urlopen(req, timeout=10)
-        data = json.loads(resp.read())
-        return data.get("user")
-    except Exception:
-        return None
 
 
 def cmd_setup(args):
@@ -65,7 +54,7 @@ def cmd_setup(args):
     else:
         print(f"  Sync    backfill agent already running")
 
-    user = _check_server(args.url, args.token)
+    user = GleanerClient(args.url, args.token).whoami()
     if user:
         print(f"  Auth    connected as {user}")
     else:
@@ -92,7 +81,7 @@ def cmd_status(args):
     print(f"  Sync    {'running' if is_backfill_agent_installed() else 'stopped'}")
 
     if url and token:
-        user = _check_server(url, token)
+        user = GleanerClient(url, token).whoami()
         print(f"  Auth    {user}" if user else "  Auth    failed")
     print()
 
@@ -126,7 +115,7 @@ def cmd_auth(args):
     write_config(url, args.token)
     print(f"Token updated ({args.token[:8]}...)")
 
-    user = _check_server(url, args.token)
+    user = GleanerClient(url, args.token).whoami()
     if user:
         print(f"Connected as {user}")
     else:

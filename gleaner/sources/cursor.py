@@ -21,7 +21,7 @@ def find_all_cursor_sessions(
     """Find all Cursor agent-transcript JSONL files.
 
     Returns [(session_id, project_name, path), ...] in the same shape
-    as backfill.find_all_sessions for Claude Code.
+    as claude.find_all_sessions.
     """
     projects_dir = CURSOR_DIR / "projects"
     if not projects_dir.exists():

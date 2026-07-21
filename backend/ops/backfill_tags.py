@@ -16,7 +16,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from backend import db
-from gleaner.tags import tag_session
+from gleaner.enrich import tag_session
 
 
 def run(dry_run: bool = False):

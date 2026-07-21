@@ -8,9 +8,9 @@ cursor-specific session discovery works.
 import json
 from pathlib import Path
 
-from gleaner.cursor import find_all_cursor_sessions, find_cursor_session_file
-from gleaner.tags import tag_session
-from gleaner.upload import parse_transcript
+from gleaner.sources.cursor import find_all_cursor_sessions, find_cursor_session_file
+from gleaner.enrich import tag_session
+from gleaner.sources.claude import parse_transcript
 
 
 # -- Fixtures for Cursor-format transcripts ----------------------------------
@@ -133,7 +133,7 @@ class TestCursorSessionDiscovery:
 
     def test_finds_sessions(self, tmp_path, monkeypatch):
         """Discovers sessions in the standard agent-transcripts layout."""
-        monkeypatch.setattr("gleaner.cursor.CURSOR_DIR", tmp_path)
+        monkeypatch.setattr("gleaner.sources.cursor.CURSOR_DIR", tmp_path)
         _cursor_transcript(SAMPLE_CURSOR_MESSAGES, tmp_path, session_id="sess-1")
         sessions = find_all_cursor_sessions()
         assert len(sessions) == 1
@@ -144,7 +144,7 @@ class TestCursorSessionDiscovery:
 
     def test_multiple_projects(self, tmp_path, monkeypatch):
         """Finds sessions across multiple project directories."""
-        monkeypatch.setattr("gleaner.cursor.CURSOR_DIR", tmp_path)
+        monkeypatch.setattr("gleaner.sources.cursor.CURSOR_DIR", tmp_path)
 
         for proj in ["Users-me-projA", "Users-me-projB"]:
             for sid in ["s1", "s2"]:
@@ -159,7 +159,7 @@ class TestCursorSessionDiscovery:
 
     def test_project_filter(self, tmp_path, monkeypatch):
         """--project filter narrows results."""
-        monkeypatch.setattr("gleaner.cursor.CURSOR_DIR", tmp_path)
+        monkeypatch.setattr("gleaner.sources.cursor.CURSOR_DIR", tmp_path)
 
         for proj in ["Users-me-projA", "Users-me-projB"]:
             d = tmp_path / "projects" / proj / "agent-transcripts" / "s1"
@@ -172,12 +172,12 @@ class TestCursorSessionDiscovery:
 
     def test_empty_when_no_projects_dir(self, tmp_path, monkeypatch):
         """Returns empty when ~/.cursor/projects/ doesn't exist."""
-        monkeypatch.setattr("gleaner.cursor.CURSOR_DIR", tmp_path)
+        monkeypatch.setattr("gleaner.sources.cursor.CURSOR_DIR", tmp_path)
         assert find_all_cursor_sessions() == []
 
     def test_skips_projects_without_transcripts(self, tmp_path, monkeypatch):
         """Projects with no agent-transcripts dir are skipped."""
-        monkeypatch.setattr("gleaner.cursor.CURSOR_DIR", tmp_path)
+        monkeypatch.setattr("gleaner.sources.cursor.CURSOR_DIR", tmp_path)
         (tmp_path / "projects" / "Users-me-empty" / "repo.json").parent.mkdir(parents=True)
         assert find_all_cursor_sessions() == []
 
@@ -223,7 +223,7 @@ class TestFindCursorSessionFile:
     """find_cursor_session_file locates transcripts by conversation ID."""
 
     def test_finds_existing(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gleaner.cursor.CURSOR_DIR", tmp_path)
+        monkeypatch.setattr("gleaner.sources.cursor.CURSOR_DIR", tmp_path)
         d = tmp_path / "projects" / "my-proj" / "agent-transcripts" / "conv-123"
         d.mkdir(parents=True)
         expected = d / "conv-123.jsonl"
@@ -231,17 +231,17 @@ class TestFindCursorSessionFile:
         assert find_cursor_session_file("conv-123") == expected
 
     def test_returns_none_for_missing(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gleaner.cursor.CURSOR_DIR", tmp_path)
+        monkeypatch.setattr("gleaner.sources.cursor.CURSOR_DIR", tmp_path)
         (tmp_path / "projects" / "proj" / "agent-transcripts").mkdir(parents=True)
         assert find_cursor_session_file("nonexistent") is None
 
     def test_returns_none_when_no_projects(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("gleaner.cursor.CURSOR_DIR", tmp_path)
+        monkeypatch.setattr("gleaner.sources.cursor.CURSOR_DIR", tmp_path)
         assert find_cursor_session_file("anything") is None
 
 
 class TestCursorUploadHook:
-    """cursor_upload.main() processes Cursor stop events correctly."""
+    """hooks.cursor.main() processes Cursor stop events correctly."""
 
     def _make_transcript(self, tmp_path, conv_id="conv-abc"):
         """Create a Cursor transcript and return its path."""
@@ -258,13 +258,13 @@ class TestCursorUploadHook:
     def test_sets_aborted_from_status(self, tmp_path, monkeypatch):
         """aborted=True when stop status is 'aborted'."""
         self._make_transcript(tmp_path)
-        monkeypatch.setattr("gleaner.cursor.CURSOR_DIR", tmp_path)
+        monkeypatch.setattr("gleaner.sources.cursor.CURSOR_DIR", tmp_path)
 
         captured = {}
         def fake_upload(sid, metadata, path):
             captured.update(metadata)
-        monkeypatch.setattr("gleaner.cursor_upload.upload", fake_upload)
-        monkeypatch.setattr("gleaner.cursor_upload.get_credentials", lambda: ("http://x", "tok"))
+        monkeypatch.setattr("gleaner.hooks.cursor.upload_transcript", fake_upload)
+        monkeypatch.setattr("gleaner.hooks.cursor.get_credentials", lambda: ("http://x", "tok"))
 
         import io
         payload = json.dumps({
@@ -274,7 +274,7 @@ class TestCursorUploadHook:
         })
         monkeypatch.setattr("sys.stdin", io.StringIO(payload))
 
-        from gleaner.cursor_upload import main
+        from gleaner.hooks.cursor import main
         main()
 
         assert captured["aborted"] is True
@@ -285,13 +285,13 @@ class TestCursorUploadHook:
     def test_sets_has_errors_from_status(self, tmp_path, monkeypatch):
         """has_errors=True when stop status is 'error'."""
         self._make_transcript(tmp_path)
-        monkeypatch.setattr("gleaner.cursor.CURSOR_DIR", tmp_path)
+        monkeypatch.setattr("gleaner.sources.cursor.CURSOR_DIR", tmp_path)
 
         captured = {}
         def fake_upload(sid, metadata, path):
             captured.update(metadata)
-        monkeypatch.setattr("gleaner.cursor_upload.upload", fake_upload)
-        monkeypatch.setattr("gleaner.cursor_upload.get_credentials", lambda: ("http://x", "tok"))
+        monkeypatch.setattr("gleaner.hooks.cursor.upload_transcript", fake_upload)
+        monkeypatch.setattr("gleaner.hooks.cursor.get_credentials", lambda: ("http://x", "tok"))
 
         import io
         payload = json.dumps({
@@ -301,7 +301,7 @@ class TestCursorUploadHook:
         })
         monkeypatch.setattr("sys.stdin", io.StringIO(payload))
 
-        from gleaner.cursor_upload import main
+        from gleaner.hooks.cursor import main
         main()
 
         assert captured["has_errors"] is True
@@ -310,13 +310,13 @@ class TestCursorUploadHook:
     def test_completed_has_no_flags(self, tmp_path, monkeypatch):
         """Completed sessions have aborted=False, has_errors=False."""
         self._make_transcript(tmp_path)
-        monkeypatch.setattr("gleaner.cursor.CURSOR_DIR", tmp_path)
+        monkeypatch.setattr("gleaner.sources.cursor.CURSOR_DIR", tmp_path)
 
         captured = {}
         def fake_upload(sid, metadata, path):
             captured.update(metadata)
-        monkeypatch.setattr("gleaner.cursor_upload.upload", fake_upload)
-        monkeypatch.setattr("gleaner.cursor_upload.get_credentials", lambda: ("http://x", "tok"))
+        monkeypatch.setattr("gleaner.hooks.cursor.upload_transcript", fake_upload)
+        monkeypatch.setattr("gleaner.hooks.cursor.get_credentials", lambda: ("http://x", "tok"))
 
         import io
         payload = json.dumps({
@@ -326,7 +326,7 @@ class TestCursorUploadHook:
         })
         monkeypatch.setattr("sys.stdin", io.StringIO(payload))
 
-        from gleaner.cursor_upload import main
+        from gleaner.hooks.cursor import main
         main()
 
         assert captured["aborted"] is False
@@ -339,32 +339,32 @@ class TestCursorUploadHook:
         (d / "conv-empty.jsonl").write_text(
             json.dumps({"role": "assistant", "message": {"content": "hi"}}) + "\n"
         )
-        monkeypatch.setattr("gleaner.cursor.CURSOR_DIR", tmp_path)
-        monkeypatch.setattr("gleaner.cursor_upload.get_credentials", lambda: ("http://x", "tok"))
+        monkeypatch.setattr("gleaner.sources.cursor.CURSOR_DIR", tmp_path)
+        monkeypatch.setattr("gleaner.hooks.cursor.get_credentials", lambda: ("http://x", "tok"))
 
         uploaded = []
-        monkeypatch.setattr("gleaner.cursor_upload.upload", lambda *a: uploaded.append(1))
+        monkeypatch.setattr("gleaner.hooks.cursor.upload_transcript", lambda *a: uploaded.append(1))
 
         import io
         payload = json.dumps({"conversation_id": "conv-empty", "status": "completed"})
         monkeypatch.setattr("sys.stdin", io.StringIO(payload))
 
-        from gleaner.cursor_upload import main
+        from gleaner.hooks.cursor import main
         main()
 
         assert uploaded == []
 
     def test_skips_missing_conversation_id(self, tmp_path, monkeypatch):
         """No conversation_id in payload → silent return."""
-        monkeypatch.setattr("gleaner.cursor_upload.get_credentials", lambda: ("http://x", "tok"))
+        monkeypatch.setattr("gleaner.hooks.cursor.get_credentials", lambda: ("http://x", "tok"))
 
         uploaded = []
-        monkeypatch.setattr("gleaner.cursor_upload.upload", lambda *a: uploaded.append(1))
+        monkeypatch.setattr("gleaner.hooks.cursor.upload_transcript", lambda *a: uploaded.append(1))
 
         import io
         monkeypatch.setattr("sys.stdin", io.StringIO("{}"))
 
-        from gleaner.cursor_upload import main
+        from gleaner.hooks.cursor import main
         main()
 
         assert uploaded == []

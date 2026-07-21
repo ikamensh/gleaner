@@ -130,31 +130,42 @@ All data endpoints require a `Bearer` token (user token or Google JWT).
 
 ```
 gleaner/
-  gleaner/              # Installable client package
-    cli.py                  # gleaner command: setup, status, on/off, auth, backfill, collect, serve, pull
-    upload.py               # gleaner-upload: Claude Code SessionEnd hook handler
-    cursor.py               # Cursor session discovery (~/.cursor/projects/)
-    cursor_upload.py        # gleaner-cursor-upload: Cursor stop hook handler
-    backfill.py             # gleaner backfill: upload existing sessions (Claude Code + Cursor)
-    config.py               # Config file + Claude Code and Cursor hook management
-    tags.py                 # Session classification: source (human/kodo/test) and task_type
-    schema.py               # Vault data schema (SessionMeta, NormalizedEntry)
-    vault.py                # Local session vault (~/.gleaner/)
-    scrub.py                # PII/secret scrubbing (optional deps)
-    cc_format.py            # Claude Code JSONL format helpers
+  gleaner/                  # Installable client package
+    sources/                # Finding & parsing local IDE sessions (self-contained)
+      claude.py                 # Claude Code discovery + flat JSONL parser (shared with Cursor)
+      cursor.py                 # Cursor session discovery (~/.cursor/projects/)
+      codex.py                  # Codex rollout discovery + parser (~/.codex/sessions/)
+      summary.py                # Shared session-metadata computation
+      cc_format.py              # Claude Code JSONL format models
+    remote/                 # HTTP client for the Gleaner server (self-contained)
+      client.py                 # GleanerClient: upload, list, fetch, download
+    scrub/                  # PII/secret scrubbing (self-contained)
+      legacy.py                 # piicleaner + detect-secrets backend
+      presidio.py               # Presidio backend (optional deps)
+    vault/                  # Local session store (~/.gleaner/)
+      schema.py                 # SessionMeta, NormalizedEntry
+      store.py                  # Ingest, normalize, parquet index, collect
+    setup/                  # Configuring a machine (self-contained)
+      config.py                 # Config file + credential resolution
+      installers.py             # Claude/Cursor hooks + launchd sync agent
+    hooks/                  # Session-end hook handlers
+      claude.py                 # gleaner-upload: Claude Code SessionEnd hook
+      cursor.py                 # gleaner-cursor-upload: Cursor stop hook
+    enrich.py               # Classification (source/task_type) + provenance
+    pipeline.py             # Shared upload flow: enrich -> scrub -> remote
+    backfill.py             # gleaner backfill: upload existing sessions (all sources)
     pull.py                 # gleaner pull: download sessions to Parquet
+    cli.py                  # gleaner command: setup, status, on/off, auth, backfill, collect, serve, pull
   server/                   # FastAPI server (deployed to Cloud Run)
     server.py               # API routes and auth
-    db.py                   # Firestore + GCS operations
+    db_local.py             # Local-vault storage backend (gleaner serve)
     db_mock.py              # In-memory mock for dev/testing
     dashboard.html          # Single-file SPA dashboard
-    Dockerfile
-    requirements.txt
-  ops/                      # Operational scripts (run manually)
-    backfill_counters.py    # Rebuild counter docs from sessions
-    backfill_topics.py      # Extract topics from transcripts
-    scrub_cloud.py          # Scrub all transcripts in GCS
+  backend/                  # Cloud storage backend
+    db.py                   # Firestore + GCS operations
+    ops/                    # Operational scripts (run manually)
   tests/
+    test_architecture.py    # Package dependency contract
     test_e2e.py             # Upload-and-retrieve integration tests
     test_scrub.py           # PII scrubbing unit tests
   .github/workflows/

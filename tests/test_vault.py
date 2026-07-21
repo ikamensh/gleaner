@@ -272,14 +272,14 @@ class TestCollect:
     @pytest.fixture(autouse=True)
     def _isolate_codex(self, tmp_path, monkeypatch):
         """Point Codex discovery at an empty dir so real ~/.codex is ignored."""
-        monkeypatch.setattr("gleaner.codex.SESSIONS_DIR", tmp_path / "no-codex")
+        monkeypatch.setattr("gleaner.sources.codex.SESSIONS_DIR", tmp_path / "no-codex")
 
     def test_claude_code(self, tmp_path, monkeypatch):
         """Claude Code sessions are discovered and ingested."""
         vault = tmp_path / "vault"
         claude = tmp_path / "claude"
-        monkeypatch.setattr("gleaner.vault.CLAUDE_DIR", claude)
-        monkeypatch.setattr("gleaner.cursor.CURSOR_DIR", tmp_path / "no-cursor")
+        monkeypatch.setattr("gleaner.sources.claude.CLAUDE_DIR", claude)
+        monkeypatch.setattr("gleaner.sources.cursor.CURSOR_DIR", tmp_path / "no-cursor")
 
         _setup_claude(claude, "my-proj", "cc-1", CLAUDE_CODE_MESSAGES)
 
@@ -292,8 +292,8 @@ class TestCollect:
         """Cursor sessions are discovered and ingested."""
         vault = tmp_path / "vault"
         cursor = tmp_path / "cursor"
-        monkeypatch.setattr("gleaner.vault.CLAUDE_DIR", tmp_path / "no-claude")
-        monkeypatch.setattr("gleaner.cursor.CURSOR_DIR", cursor)
+        monkeypatch.setattr("gleaner.sources.claude.CLAUDE_DIR", tmp_path / "no-claude")
+        monkeypatch.setattr("gleaner.sources.cursor.CURSOR_DIR", cursor)
 
         _setup_cursor(cursor, "Users-me-proj", "cur-1", CURSOR_MESSAGES)
 
@@ -305,8 +305,8 @@ class TestCollect:
         vault = tmp_path / "vault"
         claude = tmp_path / "claude"
         cursor = tmp_path / "cursor"
-        monkeypatch.setattr("gleaner.vault.CLAUDE_DIR", claude)
-        monkeypatch.setattr("gleaner.cursor.CURSOR_DIR", cursor)
+        monkeypatch.setattr("gleaner.sources.claude.CLAUDE_DIR", claude)
+        monkeypatch.setattr("gleaner.sources.cursor.CURSOR_DIR", cursor)
 
         _setup_claude(claude, "proj", "cc-1", CLAUDE_CODE_MESSAGES)
         _setup_cursor(cursor, "proj", "cur-1", CURSOR_MESSAGES)
@@ -320,8 +320,8 @@ class TestCollect:
         """Running collect twice adds nothing on the second run."""
         vault = tmp_path / "vault"
         claude = tmp_path / "claude"
-        monkeypatch.setattr("gleaner.vault.CLAUDE_DIR", claude)
-        monkeypatch.setattr("gleaner.cursor.CURSOR_DIR", tmp_path / "no-cursor")
+        monkeypatch.setattr("gleaner.sources.claude.CLAUDE_DIR", claude)
+        monkeypatch.setattr("gleaner.sources.cursor.CURSOR_DIR", tmp_path / "no-cursor")
 
         _setup_claude(claude, "proj", "s1", CLAUDE_CODE_MESSAGES)
 
@@ -333,8 +333,8 @@ class TestCollect:
         """New sessions are picked up on subsequent runs."""
         vault = tmp_path / "vault"
         claude = tmp_path / "claude"
-        monkeypatch.setattr("gleaner.vault.CLAUDE_DIR", claude)
-        monkeypatch.setattr("gleaner.cursor.CURSOR_DIR", tmp_path / "no-cursor")
+        monkeypatch.setattr("gleaner.sources.claude.CLAUDE_DIR", claude)
+        monkeypatch.setattr("gleaner.sources.cursor.CURSOR_DIR", tmp_path / "no-cursor")
 
         _setup_claude(claude, "proj", "s1", CLAUDE_CODE_MESSAGES)
         assert collect(vault_dir=vault) == 1
@@ -347,8 +347,8 @@ class TestCollect:
         """Worthless sessions (no user messages) are not collected."""
         vault = tmp_path / "vault"
         claude = tmp_path / "claude"
-        monkeypatch.setattr("gleaner.vault.CLAUDE_DIR", claude)
-        monkeypatch.setattr("gleaner.cursor.CURSOR_DIR", tmp_path / "no-cursor")
+        monkeypatch.setattr("gleaner.sources.claude.CLAUDE_DIR", claude)
+        monkeypatch.setattr("gleaner.sources.cursor.CURSOR_DIR", tmp_path / "no-cursor")
 
         worthless = [{"type": "assistant", "message": {"content": "hi"}}]
         _setup_claude(claude, "proj", "bad", worthless)

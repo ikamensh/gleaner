@@ -12,20 +12,20 @@ is carried inside ``response_item`` entries:
 
 The first line is a ``session_meta`` carrying the session_id and cwd. This
 module normalizes a rollout into the canonical entry shape consumed by
-``gleaner.upload.summarize`` so Codex sessions produce the same metadata as
-the other sources.
+``gleaner.sources.summary.summarize`` so Codex sessions produce the same
+metadata as the other sources.
 """
 
 import json
 from pathlib import Path
 
-from gleaner.upload import _first_text, make_topic, summarize
+from gleaner.sources.summary import first_text, make_topic, summarize
 
 CODEX_DIR = Path.home() / ".codex"
 SESSIONS_DIR = CODEX_DIR / "sessions"
 
 # Top-level `type` values that mark a line as Codex rollout format.
-_CODEX_LINE_TYPES = {"response_item", "event_msg", "session_meta", "turn_context"}
+CODEX_LINE_TYPES = {"response_item", "event_msg", "session_meta", "turn_context"}
 
 # Prefixes that mark an injected (non-human) "user" message: the AGENTS.md
 # preamble and the specific context blocks Codex prepends to a session. Kept
@@ -46,7 +46,7 @@ _TOOL_CALL_TYPES = {
 }
 
 
-def _codex_tool_name(payload: dict) -> str:
+def tool_name(payload: dict) -> str:
     """Tool name for a response_item payload, or "" if it is not a tool call."""
     fn = _TOOL_CALL_TYPES.get(payload.get("type"))
     return fn(payload) if fn else ""
@@ -99,7 +99,7 @@ def find_all_codex_sessions(
     """Find all Codex rollout files.
 
     Returns [(session_id, project_name, path), ...] in the same shape as
-    backfill.find_all_sessions for Claude Code.
+    claude.find_all_sessions.
     """
     if not SESSIONS_DIR.exists():
         return []
@@ -126,7 +126,7 @@ def _is_injection(text: str) -> bool:
     return text.startswith(_INJECTION_PREFIXES)
 
 
-def _codex_content_to_canonical(content) -> list[dict]:
+def content_to_canonical(content) -> list[dict]:
     """Map Codex content blocks (input_text/output_text/text) to {type:text}."""
     out = []
     if isinstance(content, list):
@@ -143,7 +143,7 @@ def _codex_content_to_canonical(content) -> list[dict]:
 
 
 def parse_codex_transcript(path: Path) -> dict:
-    """Parse a Codex rollout into the same metadata dict as parse_transcript.
+    """Parse a Codex rollout into the same metadata dict as claude.parse_transcript.
 
     Real user prompts and assistant messages become canonical entries;
     injected preambles (developer role, AGENTS.md, <context> blocks) are
@@ -184,21 +184,21 @@ def parse_codex_transcript(path: Path) -> dict:
             ptype = payload.get("type")
             if ptype == "message":
                 role = payload.get("role")
-                content = _codex_content_to_canonical(payload.get("content", []))
+                content = content_to_canonical(payload.get("content", []))
                 if role == "user":
-                    if _is_injection(_first_text(content)):
+                    if _is_injection(first_text(content)):
                         continue  # AGENTS.md / context injection, not a human turn
                 elif role != "assistant":
                     continue  # developer / system preamble
                 entries.append({"type": role, "timestamp": ts, "message": {"content": content}})
-            elif name := _codex_tool_name(payload):
+            elif name := tool_name(payload):
                 tool_uses.append(name)
 
     # Prefer the first genuine user prompt; fall back to the thread goal.
     topic = None
     for m in entries:
         if m.get("type") == "user":
-            topic = make_topic(_first_text(m["message"]["content"]))
+            topic = make_topic(first_text(m["message"]["content"]))
             break
     if not topic and goal_objective:
         topic = make_topic(goal_objective)

@@ -67,7 +67,7 @@ last_timestamp      timestamp  Latest message timestamp (null for Cursor session
 transcript_size     int        Uncompressed transcript bytes
 transcript_gz_size  int        Gzipped transcript bytes
 redactions          int        Number of PII/secret replacements made
-source              string     "human", "kodo", or "test" (auto-classified by tags.py)
+source              string     "human", "kodo", or "test" (auto-classified by enrich.py)
 task_type           string     "development", "swe_bench", "merge_conflict", "verification",
                                "commit", "analysis", "kodo_harness", "kodo_other", or "test"
 provenance.user     string     OS username (overridden by token identity)
@@ -78,7 +78,7 @@ uploaded_at         timestamp  Server-side upload time
 
 ### Source classification (`source` and `task_type`)
 
-`tags.py` classifies every session at upload time:
+`gleaner/enrich.py` classifies every session at upload time:
 
 - **`source: "kodo"`** — session originated from the kodo coding agent. Detected by: project name contains "kodo", known temporary paths, specific topic patterns ("Fix the following", "Resolve the merge conflicts", etc.), host is "openclaw-1" with empty cwd, project contains "instance_", or Cursor project contains "kodo-benchmark".
 - **`source: "test"`** — project name is "gleaner-e2e" (integration test sessions).

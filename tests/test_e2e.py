@@ -39,8 +39,9 @@ from typing import Any
 import pytest
 
 # ---------------------------------------------------------------------------
-from gleaner.config import get_credentials
-from gleaner.upload import parse_transcript, upload
+from gleaner.setup.config import get_credentials
+from gleaner.pipeline import upload_transcript
+from gleaner.sources.claude import parse_transcript
 
 GLEANER_URL, GLEANER_TOKEN = get_credentials()
 REPO_DIR = Path(__file__).resolve().parent.parent
@@ -232,7 +233,7 @@ def test_upload_and_verify():
 
     # -- Upload via library function --
     try:
-        upload(session_id, local_meta, transcript_path)
+        upload_transcript(session_id, local_meta, transcript_path)
         check("upload succeeded", True)
     except Exception as exc:
         check("upload succeeded", False, str(exc))

@@ -10,7 +10,7 @@ import pyarrow.parquet as pq
 import pytest
 
 from gleaner.pull import _flatten_session, _load_latest_timestamp, _merge_parquet, _save_parquet
-from gleaner.tags import tag_session
+from gleaner.enrich import tag_session
 
 
 def _make_session(session_id, user="alice", project="proj", uploaded_at="2026-03-20T10:00:00+00:00"):

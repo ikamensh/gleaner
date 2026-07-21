@@ -45,7 +45,7 @@ class SessionMeta(BaseModel):
     topic: str
     cwd: str
 
-    # classification (from gleaner.tags)
+    # classification (from gleaner.enrich)
     source: Literal["human", "kodo", "test"]
     task_type: str
 

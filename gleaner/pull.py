@@ -19,34 +19,14 @@ Requires pyarrow: pip install 'gleaner-cli[pull]'
 
 import json
 import sys
-import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-from gleaner.config import get_credentials
+from gleaner.enrich import tag_session
+from gleaner.remote import GleanerClient
+from gleaner.setup.config import get_credentials
 
 DEFAULT_DATA_DIR = Path.home() / ".gleaner"
-
-
-def _api_get(url: str, token: str, path: str, params: dict | None = None) -> bytes:
-    from urllib.parse import urlencode
-
-    full_url = f"{url.rstrip('/')}{path}"
-    if params:
-        clean = {k: v for k, v in params.items() if v is not None}
-        if clean:
-            full_url += f"?{urlencode(clean)}"
-    req = urllib.request.Request(full_url)
-    req.add_header("Authorization", f"Bearer {token}")
-    return urllib.request.urlopen(req, timeout=60).read()
-
-
-def _fetch_sessions(url: str, token: str, since: str | None = None) -> list[dict]:
-    params = {"limit": "100000", "export": "true"}
-    if since:
-        params["since"] = since
-    data = json.loads(_api_get(url, token, "/api/sessions", params))
-    return data.get("sessions", [])
 
 
 def _flatten_session(s: dict) -> dict:
@@ -55,8 +35,6 @@ def _flatten_session(s: dict) -> dict:
     uploaded_at = s.get("uploaded_at", "")
     if hasattr(uploaded_at, "isoformat"):
         uploaded_at = uploaded_at.isoformat()
-
-    from gleaner.tags import tag_session
 
     project = s.get("project", "")
     topic = s.get("topic", "")
@@ -130,7 +108,7 @@ def _merge_parquet(existing_path: Path, new_sessions: list[dict]) -> tuple[int, 
 
 
 def _download_transcripts(
-    session_ids: list[str], output_dir: Path, url: str, token: str, workers: int
+    session_ids: list[str], output_dir: Path, client: GleanerClient, workers: int
 ):
     output_dir.mkdir(parents=True, exist_ok=True)
     existing = {f.stem for f in output_dir.glob("*.jsonl.gz")}
@@ -144,7 +122,7 @@ def _download_transcripts(
     success = failed = 0
 
     def _one(sid):
-        data = _api_get(url, token, f"/api/session/{sid}/raw")
+        data = client.download_transcript(sid)
         (output_dir / f"{sid}.jsonl.gz").write_bytes(data)
 
     with ThreadPoolExecutor(max_workers=workers) as pool:
@@ -175,6 +153,7 @@ def run(output: str | None = None, transcripts: bool = False, workers: int = 4):
         print("pyarrow required: pip install 'gleaner-cli[pull]'", file=sys.stderr)
         sys.exit(1)
 
+    client = GleanerClient(url, token)
     data_dir = Path(output) if output else DEFAULT_DATA_DIR
     data_dir.mkdir(parents=True, exist_ok=True)
     parquet_path = data_dir / "sessions.parquet"
@@ -189,7 +168,7 @@ def run(output: str | None = None, transcripts: bool = False, workers: int = 4):
         except Exception:
             pass
 
-    sessions = _fetch_sessions(url, token, since=since)
+    sessions = client.fetch_sessions(since=since)
 
     if parquet_path.exists() and since is not None:
         total, added = _merge_parquet(parquet_path, sessions)
@@ -212,7 +191,7 @@ def run(output: str | None = None, transcripts: bool = False, workers: int = 4):
             all_ids = table.column("session_id").to_pylist()
         else:
             all_ids = [s["session_id"] for s in sessions if s.get("session_id")]
-        _download_transcripts(all_ids, data_dir / "transcripts", url, token, workers)
+        _download_transcripts(all_ids, data_dir / "transcripts", client, workers)
 
     print(f"\nData: {parquet_path}")
 
