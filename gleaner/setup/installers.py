@@ -2,32 +2,32 @@
 
 Three integration points: the Claude Code SessionEnd hook
 (~/.claude/settings.json), the Cursor stop hook (~/.cursor/hooks.json),
-and a launchd agent that backfills every source periodically.
+and a periodic sync agent registered with the OS-native scheduler
+(see gleaner.setup.sync_agent).
+
+Hook commands are written as absolute paths: GUI-launched IDEs don't
+inherit the shell PATH that would resolve a bare `gleaner-upload`.
 """
 
 import json
-import plistlib
-import shutil
-import subprocess
 from pathlib import Path
+
+from gleaner.setup.sync_agent import (  # noqa: F401  (re-exported)
+    BACKFILL_INTERVAL,
+    find_script,
+    install_backfill_agent,
+    is_backfill_agent_installed,
+    remove_backfill_agent,
+)
 
 CLAUDE_SETTINGS = Path.home() / ".claude" / "settings.json"
 CURSOR_HOOKS = Path.home() / ".cursor" / "hooks.json"
-LAUNCHD_LABEL = "com.gleaner.sync"
-LAUNCHD_PLIST = Path.home() / "Library" / "LaunchAgents" / f"{LAUNCHD_LABEL}.plist"
-# Older single-source agent labels to clean up on (un)install.
-_LEGACY_LAUNCHD_LABELS = ["com.gleaner.cursor-backfill"]
-BACKFILL_INTERVAL = 300  # seconds
 
-HOOK_ENTRY = {
-    "hooks": [
-        {
-            "type": "command",
-            "command": "gleaner-upload",
-            "timeout": 30,
-        }
-    ]
-}
+
+def _hook_command(script: str) -> str:
+    """Absolute, shell-safe command for a hook entry."""
+    path = find_script(script)
+    return f'"{path}"' if " " in path else path
 
 
 def read_claude_settings() -> dict:
@@ -41,7 +41,7 @@ def read_claude_settings() -> dict:
 
 def write_claude_settings(settings: dict):
     CLAUDE_SETTINGS.parent.mkdir(parents=True, exist_ok=True)
-    CLAUDE_SETTINGS.write_text(json.dumps(settings, indent=2) + "\n")
+    CLAUDE_SETTINGS.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
 
 
 def is_hook_installed() -> bool:
@@ -60,7 +60,17 @@ def install_hook() -> bool:
     settings = read_claude_settings()
     settings.setdefault("hooks", {})
     settings["hooks"].setdefault("SessionEnd", [])
-    settings["hooks"]["SessionEnd"].append(HOOK_ENTRY)
+    settings["hooks"]["SessionEnd"].append(
+        {
+            "hooks": [
+                {
+                    "type": "command",
+                    "command": _hook_command("gleaner-upload"),
+                    "timeout": 30,
+                }
+            ]
+        }
+    )
     write_claude_settings(settings)
     return True
 
@@ -95,7 +105,7 @@ def read_cursor_hooks() -> dict:
 
 def write_cursor_hooks(hooks: dict):
     CURSOR_HOOKS.parent.mkdir(parents=True, exist_ok=True)
-    CURSOR_HOOKS.write_text(json.dumps(hooks, indent=2) + "\n")
+    CURSOR_HOOKS.write_text(json.dumps(hooks, indent=2) + "\n", encoding="utf-8")
 
 
 def is_cursor_hook_installed() -> bool:
@@ -114,7 +124,7 @@ def install_cursor_hook() -> bool:
     cfg["version"] = 1
     cfg.setdefault("hooks", {})
     cfg["hooks"].setdefault("stop", [])
-    cfg["hooks"]["stop"].append({"command": "gleaner-cursor-upload"})
+    cfg["hooks"]["stop"].append({"command": _hook_command("gleaner-cursor-upload")})
     write_cursor_hooks(cfg)
     return True
 
@@ -129,74 +139,3 @@ def remove_cursor_hook() -> bool:
     cfg["hooks"]["stop"] = filtered
     write_cursor_hooks(cfg)
     return True
-
-
-# -- Periodic sync agent (launchd) ---------------------------------------------
-# Backfills every local source (Claude, Cursor, Codex) on an interval. Codex
-# has no realtime hook, so this agent is its primary auto-store path; for
-# Claude/Cursor it is a safety net behind their session hooks. Re-uploads are
-# idempotent server-side, so running it repeatedly never double-counts.
-
-
-def _backfill_command() -> str:
-    """Find the gleaner-backfill executable path."""
-    path = shutil.which("gleaner-backfill")
-    if path:
-        return path
-    # Fall back to the same directory as the current Python
-    import sys
-    candidate = Path(sys.executable).parent / "gleaner-backfill"
-    if candidate.exists():
-        return str(candidate)
-    return "gleaner-backfill"
-
-
-def _legacy_plist(label: str) -> Path:
-    # Sibling of the current agent's plist, so tests that redirect
-    # LAUNCHD_PLIST also isolate legacy cleanup.
-    return LAUNCHD_PLIST.parent / f"{label}.plist"
-
-
-def _remove_legacy_agents():
-    """Unload and delete any superseded single-source backfill agents."""
-    for label in _LEGACY_LAUNCHD_LABELS:
-        plist = _legacy_plist(label)
-        if plist.exists():
-            subprocess.run(["launchctl", "unload", str(plist)], capture_output=True)
-            plist.unlink()
-
-
-def is_backfill_agent_installed() -> bool:
-    return LAUNCHD_PLIST.exists()
-
-
-def install_backfill_agent() -> bool:
-    """Install a launchd agent that backfills all local sources periodically."""
-    _remove_legacy_agents()
-    if LAUNCHD_PLIST.exists():
-        return False
-
-    plist = {
-        "Label": LAUNCHD_LABEL,
-        "ProgramArguments": [_backfill_command(), "--source", "all"],
-        "StartInterval": BACKFILL_INTERVAL,
-        "StandardOutPath": str(Path.home() / ".gleaner" / "backfill.log"),
-        "StandardErrorPath": str(Path.home() / ".gleaner" / "backfill.log"),
-        "RunAtLoad": True,
-    }
-
-    LAUNCHD_PLIST.parent.mkdir(parents=True, exist_ok=True)
-    (Path.home() / ".gleaner").mkdir(parents=True, exist_ok=True)
-    LAUNCHD_PLIST.write_bytes(plistlib.dumps(plist))
-    subprocess.run(["launchctl", "load", str(LAUNCHD_PLIST)], capture_output=True)
-    return True
-
-
-def remove_backfill_agent() -> bool:
-    """Unload and remove the launchd sync agent (and any legacy agents)."""
-    existed = LAUNCHD_PLIST.exists()
-    if existed:
-        subprocess.run(["launchctl", "unload", str(LAUNCHD_PLIST)], capture_output=True)
-        LAUNCHD_PLIST.unlink()
-    _remove_legacy_agents()
-    return existed

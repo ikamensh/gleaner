@@ -102,5 +102,19 @@ def main():
     run(dry_run=args.dry_run, project=args.project, force=args.force, source=args.source)
 
 
+def main_quiet():
+    """Entry point for schedulers that can't redirect output.
+
+    Windows Task Scheduler runs this as a windowed exe (gui-script), where
+    sys.stdout/stderr don't exist — so log to ~/.gleaner/backfill.log, the
+    same file launchd/systemd redirect to on the other OSes.
+    """
+    log_dir = Path.home() / ".gleaner"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    with open(log_dir / "backfill.log", "a", encoding="utf-8", buffering=1) as log:
+        sys.stdout = sys.stderr = log
+        main()
+
+
 if __name__ == "__main__":
     main()

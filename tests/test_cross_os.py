@@ -28,6 +28,7 @@ from pathlib import Path
 import pytest
 
 import gleaner.setup.installers as installers
+import gleaner.setup.sync_agent as sync_agent
 
 DEAD_URL = "http://127.0.0.1:9"  # connection refused instantly; whoami returns None
 
@@ -190,3 +191,106 @@ class TestHookCommandsResolvable:
         path = _command_path(entry["command"])
         assert path.is_absolute(), f"hook command not absolute: {entry['command']}"
         assert path.exists(), f"hook command does not exist: {path}"
+
+
+class _FakeScheduler:
+    """Records scheduler commands instead of running them; emulates enough
+    schtasks state (create/query/delete by /TN) for lifecycle tests."""
+
+    def __init__(self):
+        self.calls: list[tuple[str, ...]] = []
+        self.tasks: set[str] = set()
+
+    def __call__(self, *argv: str) -> bool:
+        self.calls.append(argv)
+        if argv[0] != "schtasks":
+            return True
+        action, name = argv[1], argv[argv.index("/TN") + 1]
+        if action == "/Query":
+            return name in self.tasks
+        if action == "/Create":
+            self.tasks.add(name)
+            return True
+        if action == "/Delete":
+            self.tasks.discard(name)
+            return True
+        return True
+
+
+@pytest.fixture
+def unit_home(tmp_path, monkeypatch):
+    """In-process fake home + name seam, scheduler commands stubbed.
+
+    sync_agent computes every path lazily from Path.home(), so redirecting
+    HOME/USERPROFILE is enough — no module constants to patch.
+    """
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    monkeypatch.setenv("GLEANER_SYNC_NAME", "com.gleaner.unittest")
+    fake = _FakeScheduler()
+    monkeypatch.setattr(sync_agent, "_run_quiet", fake)
+    return tmp_path, fake
+
+
+class TestSchedulerBackends:
+    """Content checks for what each backend registers.
+
+    The registration must survive reboots and point at an absolute
+    executable, because schedulers run with a minimal PATH.
+    """
+
+    def test_lifecycle_roundtrip(self, unit_home):
+        """Install/remove invariants hold on whichever OS runs this."""
+        assert sync_agent.install_backfill_agent() is True
+        assert sync_agent.is_backfill_agent_installed() is True
+        assert sync_agent.install_backfill_agent() is False  # idempotent
+        assert sync_agent.remove_backfill_agent() is True
+        assert sync_agent.is_backfill_agent_installed() is False
+        assert sync_agent.remove_backfill_agent() is False
+
+    @pytest.mark.skipif(sys.platform != "darwin", reason="launchd backend")
+    def test_launchd_plist_content(self, unit_home):
+        import plistlib
+
+        home, fake = unit_home
+        sync_agent.install_backfill_agent()
+        plist_path = home / "Library" / "LaunchAgents" / "com.gleaner.unittest.plist"
+        plist = plistlib.loads(plist_path.read_bytes())
+        assert plist["Label"] == "com.gleaner.unittest"
+        cmd = Path(plist["ProgramArguments"][0])
+        assert cmd.is_absolute() and cmd.exists()
+        assert plist["ProgramArguments"][1:] == ["--source", "all"]
+        assert plist["StartInterval"] == sync_agent.BACKFILL_INTERVAL
+        assert plist["RunAtLoad"] is True
+        assert ("launchctl", "load", str(plist_path)) in fake.calls
+
+    @pytest.mark.skipif(not sys.platform.startswith("linux"), reason="systemd backend")
+    def test_systemd_unit_content(self, unit_home):
+        home, fake = unit_home
+        sync_agent.install_backfill_agent()
+        units = home / ".config" / "systemd" / "user"
+        service = (units / "com.gleaner.unittest.service").read_text()
+        timer = (units / "com.gleaner.unittest.timer").read_text()
+
+        exec_line = next(l for l in service.splitlines() if l.startswith("ExecStart="))
+        cmd = Path(exec_line.removeprefix('ExecStart="').split('"')[0])
+        assert cmd.is_absolute() and cmd.exists()
+        assert exec_line.endswith("--source all")
+        assert f"OnUnitActiveSec={sync_agent.BACKFILL_INTERVAL}" in timer
+        assert "WantedBy=timers.target" in timer
+        assert "Unit=com.gleaner.unittest.service" in timer
+        assert ("systemctl", "--user", "enable", "--now", "com.gleaner.unittest.timer") in fake.calls
+
+    @pytest.mark.skipif(sys.platform != "win32", reason="schtasks backend")
+    def test_schtasks_registration(self, unit_home):
+        home, fake = unit_home
+        sync_agent.install_backfill_agent()
+        create = next(c for c in fake.calls if c[:2] == ("schtasks", "/Create"))
+        args = dict(zip(create, create[1:]))
+        assert args["/TN"] == "com.gleaner.unittest"
+        assert args["/SC"] == "MINUTE"
+        assert int(args["/MO"]) == sync_agent.BACKFILL_INTERVAL // 60
+        command = args["/TR"]
+        assert command.endswith(" --source all")
+        exe = Path(command[1 : command.index('"', 1)])
+        assert exe.is_absolute() and exe.exists()

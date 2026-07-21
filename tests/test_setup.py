@@ -1,7 +1,10 @@
-"""Tests for gleaner.setup: config file I/O, hook and agent installation."""
+"""Tests for gleaner.setup: config file I/O and hook installation.
+
+The periodic sync agent (per-OS scheduler backends) is covered in
+test_cross_os.py.
+"""
 
 import json
-import plistlib
 
 import pytest
 
@@ -15,9 +18,6 @@ def isolated_paths(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "CONFIG_FILE", tmp_path / "gleaner.json")
     monkeypatch.setattr(installers, "CLAUDE_SETTINGS", tmp_path / ".claude" / "settings.json")
     monkeypatch.setattr(installers, "CURSOR_HOOKS", tmp_path / ".cursor" / "hooks.json")
-    monkeypatch.setattr(installers, "LAUNCHD_PLIST", tmp_path / "LaunchAgents" / f"{installers.LAUNCHD_LABEL}.plist")
-    # Stub out launchctl so tests don't touch the real system
-    monkeypatch.setattr(installers.subprocess, "run", lambda *a, **kw: None)
 
 
 class TestConfigRoundtrip:
@@ -271,30 +271,3 @@ class TestCursorHookManagement:
         cfg = installers.read_cursor_hooks()
         assert len(cfg["hooks"]["stop"]) == 1
         assert cfg["hooks"]["stop"][0]["command"] == "my-other-hook"
-
-
-class TestBackfillAgent:
-    """install_backfill_agent / remove_backfill_agent manage a launchd plist."""
-
-    def test_install_creates_valid_plist(self):
-        assert installers.install_backfill_agent() is True
-        assert installers.LAUNCHD_PLIST.exists()
-        plist = plistlib.loads(installers.LAUNCHD_PLIST.read_bytes())
-        assert plist["Label"] == installers.LAUNCHD_LABEL
-        assert "--source" in plist["ProgramArguments"]
-        assert "all" in plist["ProgramArguments"]
-        assert plist["StartInterval"] == installers.BACKFILL_INTERVAL
-        assert plist["RunAtLoad"] is True
-
-    def test_install_is_idempotent(self):
-        installers.install_backfill_agent()
-        assert installers.install_backfill_agent() is False
-
-    def test_remove(self):
-        installers.install_backfill_agent()
-        assert installers.remove_backfill_agent() is True
-        assert not installers.LAUNCHD_PLIST.exists()
-        assert installers.is_backfill_agent_installed() is False
-
-    def test_remove_when_not_installed(self):
-        assert installers.remove_backfill_agent() is False
