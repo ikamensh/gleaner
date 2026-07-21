@@ -10,15 +10,22 @@ https://gleaner-430011644943.europe-west1.run.app/gleaner/
 
 ## Quick start
 
+Works on macOS, Linux, and Windows; the same commands everywhere.
+
 ```bash
 # Install the CLI (requires uv: https://docs.astral.sh/uv)
 uv tool install git+https://github.com/ikamensh/gleaner
 
 # Configure and install the session hooks (Claude Code + Cursor)
+# and the periodic sync agent
 gleaner setup https://gleaner-430011644943.europe-west1.run.app gl_your_token
 
 # Check everything is working
 gleaner status
+
+# Optional: menu bar / system tray icon with an on/off switch
+gleaner tray install   # start at login
+gleaner tray           # or run it right now
 ```
 
 That's it. New Claude Code and Cursor sessions auto-upload from now on.
@@ -45,6 +52,8 @@ gleaner collect                      # Collect local IDE sessions into the local
 gleaner pull                         # Download sessions for local analysis (Parquet)
 gleaner pull --transcripts           # Also download raw transcripts
 gleaner serve                        # Start local dashboard (http://127.0.0.1:8765)
+gleaner tray                         # Menu bar / tray icon: quick status + on/off switch
+gleaner tray install                 # Start the tray at login (uninstall to remove)
 ```
 
 Config is stored in `~/.config/gleaner.json` as one or more **named remotes** (Gleaner server instances) with one active; the active remote is what hooks and the CLI upload to. Switch instances with `gleaner remote use NAME`, or override per-invocation with `GLEANER_REMOTE=NAME` (or `GLEANER_URL`/`GLEANER_TOKEN`). Claude Code hooks are managed in `~/.claude/settings.json`; Cursor hooks in `~/.cursor/hooks.json`.
@@ -83,7 +92,30 @@ stop hook fires (gleaner-cursor-upload)
   - uploads metadata to Firestore + raw transcript to GCS
 ```
 
-A periodic launchd agent (every 5 min) runs `gleaner backfill --source cursor` to catch any sessions missed by the stop hook.
+### Periodic sync agent
+
+`gleaner setup` also registers a sync agent with the OS-native scheduler that
+runs `gleaner-backfill --source all` every 5 minutes. It is the primary
+capture path for Codex (which has no session hooks) and a safety net behind
+the Claude Code and Cursor hooks. Re-uploads are idempotent server-side.
+
+| OS | Scheduler | Registration |
+|----|-----------|--------------|
+| macOS | launchd | `~/Library/LaunchAgents/com.gleaner.sync.plist` |
+| Linux | systemd user timer | `~/.config/systemd/user/gleaner-backfill.{service,timer}` |
+| Windows | Task Scheduler | task `GleanerBackfill` (windowed, no console flash) |
+
+The agent logs to `~/.gleaner/backfill.log`. `gleaner on` / `gleaner off`
+toggle the hooks and the agent together; `gleaner status` reports what is
+actually registered.
+
+### Tray app
+
+`gleaner tray` puts Gleaner in the macOS menu bar or the Linux/Windows
+system tray: a green dot while capturing, gray when paused, with a menu for
+toggling capture, running a backfill immediately, and opening the dashboard.
+`gleaner tray install` registers it as a login item (launchd agent on macOS,
+XDG autostart on Linux, `HKCU\...\Run` on Windows).
 
 Both IDEs record full session transcripts locally as JSONL files. Gleaner collects these centrally so you can browse, search, and analyze them across your whole team.
 
@@ -152,7 +184,9 @@ gleaner/
       store.py                  # Ingest, normalize, parquet index, collect
     setup/                  # Configuring a machine (self-contained)
       config.py                 # Config file + credential resolution
-      installers.py             # Claude/Cursor hooks + launchd sync agent
+      installers.py             # Claude/Cursor hooks (absolute-path commands)
+      sync_agent.py             # Periodic backfill: launchd / systemd timer / schtasks
+      autostart.py              # Tray login item: launchd / XDG autostart / HKCU Run
     hooks/                  # Session-end hook handlers
       claude.py                 # gleaner-upload: Claude Code SessionEnd hook
       cursor.py                 # gleaner-cursor-upload: Cursor stop hook
@@ -160,7 +194,8 @@ gleaner/
     pipeline.py             # Shared upload flow: enrich -> scrub -> remote
     backfill.py             # gleaner backfill: upload existing sessions (all sources)
     pull.py                 # gleaner pull: download sessions to Parquet
-    cli.py                  # gleaner command: setup, status, on/off, auth, backfill, collect, serve, pull
+    tray.py                 # gleaner tray: menu bar / system tray status + on/off
+    cli.py                  # gleaner command: setup, status, on/off, auth, backfill, collect, serve, pull, tray
   server/                   # FastAPI server (deployed to Cloud Run)
     server.py               # API routes and auth
     db_local.py             # Local-vault storage backend (gleaner serve)
