@@ -69,17 +69,6 @@ def _flatten_session(s: dict) -> dict:
     }
 
 
-def _save_parquet(sessions: list[dict], path: Path):
-    import pyarrow as pa
-    import pyarrow.parquet as pq
-
-    rows = [_flatten_session(s) for s in sessions]
-    if not rows:
-        return
-    table = pa.Table.from_pylist(rows)
-    pq.write_table(table, path, compression="zstd")
-
-
 def _load_latest_timestamp(path: Path) -> str | None:
     """Read the latest uploaded_at from existing Parquet."""
     import pyarrow.parquet as pq
@@ -89,22 +78,23 @@ def _load_latest_timestamp(path: Path) -> str | None:
     return max(timestamps) if timestamps else None
 
 
-def _merge_parquet(existing_path: Path, new_sessions: list[dict]) -> tuple[int, int]:
-    """Merge new sessions into existing Parquet. Returns (total, added)."""
+def _upsert_parquet(path: Path, sessions: list[dict]) -> tuple[int, int]:
+    """Add sessions to the Parquet file, deduplicated by id. Returns (total, added)."""
     import pyarrow as pa
     import pyarrow.parquet as pq
 
-    existing = pq.read_table(existing_path)
-    existing_ids = set(existing.column("session_id").to_pylist())
+    existing = pq.read_table(path) if path.exists() else None
+    existing_ids = set(existing.column("session_id").to_pylist()) if existing else set()
 
-    truly_new = [s for s in new_sessions if s.get("session_id") not in existing_ids]
-    if not truly_new:
-        return existing.num_rows, 0
+    new = [s for s in sessions if s.get("session_id") not in existing_ids]
+    if not new:
+        return existing.num_rows if existing else 0, 0
 
-    new_table = pa.Table.from_pylist([_flatten_session(s) for s in truly_new])
-    merged = pa.concat_tables([existing, new_table], promote_options="default")
-    pq.write_table(merged, existing_path, compression="zstd")
-    return merged.num_rows, len(truly_new)
+    table = pa.Table.from_pylist([_flatten_session(s) for s in new])
+    if existing is not None:
+        table = pa.concat_tables([existing, table], promote_options="default")
+    pq.write_table(table, path, compression="zstd")
+    return table.num_rows, len(new)
 
 
 def _download_transcripts(
@@ -169,28 +159,20 @@ def run(output: str | None = None, transcripts: bool = False, workers: int = 4):
             pass
 
     sessions = client.fetch_sessions(since=since)
-
-    if parquet_path.exists() and since is not None:
-        total, added = _merge_parquet(parquet_path, sessions)
-        if added:
-            print(f"Added {added} sessions (total: {total})")
-        else:
-            print(f"Up to date ({total} sessions)")
-    elif sessions:
-        _save_parquet(sessions, parquet_path)
-        print(f"Saved {len(sessions)} sessions -> {parquet_path}")
-    else:
+    total, added = _upsert_parquet(parquet_path, sessions)
+    if total == 0:
         print("No sessions found on server")
         return
+    if added:
+        print(f"Added {added} sessions (total: {total})")
+    else:
+        print(f"Up to date ({total} sessions)")
 
     if transcripts:
-        # Get all session IDs for transcript download
-        if parquet_path.exists():
-            import pyarrow.parquet as pq
-            table = pq.read_table(parquet_path, columns=["session_id"])
-            all_ids = table.column("session_id").to_pylist()
-        else:
-            all_ids = [s["session_id"] for s in sessions if s.get("session_id")]
+        import pyarrow.parquet as pq
+
+        table = pq.read_table(parquet_path, columns=["session_id"])
+        all_ids = table.column("session_id").to_pylist()
         _download_transcripts(all_ids, data_dir / "transcripts", client, workers)
 
     print(f"\nData: {parquet_path}")

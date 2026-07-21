@@ -8,14 +8,23 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
+        with:
+          # piicleaner ships wheels up to cp313; newer pythons trigger a
+          # broken maturin source build on the macOS runner
+          python-version: "3.13"
       - uses: actions/setup-node@v4
         with:
           node-version: 22
       - name: Run tests
+        shell: bash
         run: |
           uv run \
             --with pytest --with httpx \

@@ -109,14 +109,15 @@ def _get_presidio():
 # Entity types worth redacting in code transcripts.
 # Excludes DATE_TIME (timestamps are structural), URL (file paths get caught),
 # NRP, US_DRIVER_LICENSE, and other low-signal types that cause false positives.
-_ENTITIES = [
-    # PII
+_PII_ENTITIES = [
     "CREDIT_CARD", "CRYPTO", "EMAIL_ADDRESS", "IBAN_CODE", "IP_ADDRESS",
     "PHONE_NUMBER", "US_SSN", "US_PASSPORT", "US_BANK_NUMBER", "US_ITIN",
-    # Custom secrets
+]
+_SECRET_ENTITIES = [
     "SECRET_KEY", "PEM_KEY", "BEARER_TOKEN", "CONNECTION_STRING",
     "AWS_KEY", "GITHUB_TOKEN",
 ]
+_ENTITIES = _PII_ENTITIES + _SECRET_ENTITIES
 
 _SCORE_THRESHOLD = 0.4
 
@@ -131,12 +132,7 @@ def scrub(text: str) -> tuple[str, int]:
 
     operators = {
         "DEFAULT": OperatorConfig("replace", {"new_value": PII_REDACTED}),
-        "SECRET_KEY": OperatorConfig("replace", {"new_value": REDACTED}),
-        "PEM_KEY": OperatorConfig("replace", {"new_value": REDACTED}),
-        "BEARER_TOKEN": OperatorConfig("replace", {"new_value": REDACTED}),
-        "CONNECTION_STRING": OperatorConfig("replace", {"new_value": REDACTED}),
-        "AWS_KEY": OperatorConfig("replace", {"new_value": REDACTED}),
-        "GITHUB_TOKEN": OperatorConfig("replace", {"new_value": REDACTED}),
+        **{e: OperatorConfig("replace", {"new_value": REDACTED}) for e in _SECRET_ENTITIES},
     }
 
     # Split into chunks on newline boundaries to stay under spaCy's limit.

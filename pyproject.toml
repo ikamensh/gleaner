@@ -1,10 +1,10 @@
 [project]
 name = "gleaner"
-version = "0.1.10"
+version = "0.1.19"
 description = "Upload Claude Code session transcripts to Gleaner"
 requires-python = ">=3.10"
 license = "MIT"
-dependencies = ["piicleaner", "detect-secrets", "pydantic>=2", "fastapi>=0.110", "uvicorn>=0.27", "pyarrow"]
+dependencies = ["piicleaner", "detect-secrets", "pydantic>=2", "fastapi>=0.110", "uvicorn>=0.27", "pyarrow", "pystray>=0.19", "pillow>=10"]
 
 [project.scripts]
 gleaner = "gleaner.cli:main"
@@ -12,6 +12,11 @@ gleaner-upload = "gleaner.hooks.claude:main"
 gleaner-backfill = "gleaner.backfill:main"
 gleaner-pull = "gleaner.pull:main"
 gleaner-cursor-upload = "gleaner.hooks.cursor:main"
+
+[project.gui-scripts]
+# Windowed on Windows (no console flash from Task Scheduler); plain scripts elsewhere.
+gleaner-backfill-quiet = "gleaner.backfill:main_quiet"
+gleaner-tray = "gleaner.tray:main"
 
 [project.optional-dependencies]
 presidio = [

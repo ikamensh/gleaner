@@ -2,16 +2,21 @@
 
 Implements the same interface as db.py / db_mock.py but reads from
 the local parquet index and JSONL transcript files. No cloud dependencies.
+
+Stats are produced by replaying the shared counter deltas (backend.stats)
+over the vault rows, so local mode returns exactly the shapes the cloud
+backend does.
 """
 
 import getpass
 import gzip
 import json
-from collections import defaultdict
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime
 from pathlib import Path
 
 import pyarrow.parquet as pq
+
+from backend import stats
 
 VAULT_DIR = Path.home() / ".gleaner"
 LOCAL_USER = getpass.getuser()
@@ -35,37 +40,33 @@ def _load_index() -> list[dict]:
     return _index_cache
 
 
-def _duration_seconds(first_ts: str, last_ts: str) -> float:
-    if not first_ts or not last_ts:
-        return 0.0
+def _tool_counts(row: dict) -> dict:
     try:
-        s = datetime.fromisoformat(first_ts.replace("Z", "+00:00"))
-        e = datetime.fromisoformat(last_ts.replace("Z", "+00:00"))
-        return max((e - s).total_seconds(), 0)
-    except (ValueError, AttributeError):
-        return 0.0
+        return json.loads(row.get("tool_counts_json", "{}"))
+    except (json.JSONDecodeError, TypeError):
+        return {}
 
 
-def _aggregate_tool_usage(rows: list[dict]) -> dict[str, int]:
-    """Sum tool counts across rows from tool_counts_json."""
-    totals: dict[str, int] = defaultdict(int)
-    for r in rows:
-        try:
-            for tool, count in json.loads(r.get("tool_counts_json", "{}")).items():
-                totals[tool] += count
-        except (json.JSONDecodeError, TypeError):
-            pass
-    return dict(sorted(totals.items(), key=lambda x: -x[1]))
+def _replay_counters(rows: list[dict]) -> dict:
+    """Build counter docs by replaying the shared per-session deltas.
 
-
-def _count_by_date(rows: list[dict]) -> dict[str, int]:
-    """Count sessions per date from first_timestamp."""
-    counts: dict[str, int] = defaultdict(int)
-    for r in rows:
-        ts = (r.get("first_timestamp") or "")[:10]
-        if ts:
-            counts[ts] += 1
-    return counts
+    Oldest first, so last_active/last_session_id land on the newest session.
+    """
+    counters: dict = {}
+    for r in sorted(rows, key=lambda r: r.get("first_timestamp") or ""):
+        metadata = {
+            "project": r.get("project", ""),
+            "message_count": r.get("message_count", 0),
+            "tool_use_count": r.get("tool_use_count", 0),
+            "tool_counts": _tool_counts(r),
+            "first_timestamp": r.get("first_timestamp", ""),
+            "last_timestamp": r.get("last_timestamp", ""),
+        }
+        deltas = stats.counter_deltas(
+            r["session_id"], metadata, {"user": r.get("user", "")}
+        )
+        stats.apply_deltas(counters, deltas)
+    return counters
 
 
 def _row_to_session(row: dict, include_tool_counts: bool = False) -> dict:
@@ -213,214 +214,31 @@ def list_sessions(
 
 def get_user_stats(username: str) -> dict:
     rows = [r for r in _load_index() if r.get("user") == username]
-    return _compute_user_stats(username, rows)
+    counter = _replay_counters(rows).get(f"user:{username}")
+    if not counter:
+        return stats.build_user_stats(username, None, [], None)
 
-
-def _compute_user_stats(username: str, rows: list[dict]) -> dict:
-    empty = {
-        "user": username,
-        "total_sessions": 0,
-        "avg_messages_per_session": 0,
-        "last_session": None,
-        "week_stats": {
-            "sessions": 0, "sessions_prev_week": 0, "messages": 0,
-            "avg_duration_seconds": 0, "total_duration_seconds": 0,
-            "active_days": 0, "most_active_project": "",
-        },
-        "heatmap": [], "tool_usage": {}, "project_usage": {}, "recent_sessions": [],
-    }
-    if not rows:
-        return empty
-
-    today = date.today()
-    week_start = today - timedelta(days=today.weekday())
-    prev_week_start = week_start - timedelta(days=7)
-    heatmap_start = (today.replace(day=1) - timedelta(days=90)).replace(day=1)
-
-    total_sessions = len(rows)
-    total_messages = sum(r.get("message_count", 0) for r in rows)
-
-    # Sort by first_timestamp descending for recent sessions
     sorted_rows = sorted(rows, key=lambda r: r.get("first_timestamp") or "", reverse=True)
-
-    # Last session
-    last_row = sorted_rows[0]
-    last_session = _row_to_session(last_row, include_tool_counts=True)
-
-    # Recent sessions
-    recent = [_row_to_session(r) for r in sorted_rows[:10]]
-
-    # Week stats
-    week_sessions = 0
-    week_messages = 0
-    week_duration = 0.0
-    week_dates: set[str] = set()
-    prev_week_sessions = 0
-    week_projects: dict[str, int] = defaultdict(int)
-
-    for r in rows:
-        ts = (r.get("first_timestamp") or "")[:10]
-        if not ts:
-            continue
-        dur = _duration_seconds(r.get("first_timestamp", ""), r.get("last_timestamp", ""))
-        if ts >= week_start.isoformat():
-            week_sessions += 1
-            week_messages += r.get("message_count", 0)
-            week_duration += dur
-            week_dates.add(ts)
-            proj = r.get("project", "")
-            if proj:
-                week_projects[proj] += 1
-        elif ts >= prev_week_start.isoformat():
-            prev_week_sessions += 1
-
-    most_active = max(week_projects, key=week_projects.get) if week_projects else ""
-
-    date_counts = _count_by_date(rows)
-    heatmap = []
-    d = heatmap_start
-    while d <= today:
-        ds = d.isoformat()
-        heatmap.append({"date": ds, "count": date_counts.get(ds, 0)})
-        d += timedelta(days=1)
-
-    project_usage: dict[str, int] = defaultdict(int)
-    for r in rows:
-        proj = r.get("project", "")
-        if proj:
-            project_usage[proj] += 1
-
-    return {
-        "user": username,
-        "total_sessions": total_sessions,
-        "avg_messages_per_session": round(total_messages / total_sessions) if total_sessions else 0,
-        "last_session": last_session,
-        "week_stats": {
-            "sessions": week_sessions,
-            "sessions_prev_week": prev_week_sessions,
-            "messages": week_messages,
-            "avg_duration_seconds": round(week_duration / week_sessions) if week_sessions else 0,
-            "total_duration_seconds": round(week_duration),
-            "active_days": len(week_dates),
-            "most_active_project": most_active,
-        },
-        "heatmap": heatmap,
-        "tool_usage": _aggregate_tool_usage(rows),
-        "project_usage": dict(sorted(project_usage.items(), key=lambda x: -x[1])),
-        "recent_sessions": recent,
-    }
+    recent = [_row_to_session(r) for r in sorted_rows[:20]]
+    last_session = get_session(counter.get("last_session_id", ""))
+    return stats.build_user_stats(username, counter, recent, last_session)
 
 
 def get_stats() -> dict:
     rows = _load_index()
-    if not rows:
-        return {
-            "total_sessions": 0, "total_messages": 0, "total_tool_uses": 0,
-            "unique_users": 0, "unique_projects": 0, "avg_duration_seconds": 0,
-            "active_this_week": 0, "users": [], "projects": [],
-            "tool_usage": {}, "timeline": [], "user_stats": {},
-            "project_stats": {}, "recent_sessions": [],
-        }
-
-    today = date.today()
-    week_start = today - timedelta(days=today.weekday())
-    week_start_str = week_start.isoformat()
-
-    total_sessions = len(rows)
-    total_messages = sum(r.get("message_count", 0) for r in rows)
-    total_tool_uses = sum(r.get("tool_use_count", 0) for r in rows)
-    total_duration = sum(
-        _duration_seconds(r.get("first_timestamp", ""), r.get("last_timestamp", ""))
-        for r in rows
-    )
-
-    users = sorted({r.get("user", "") for r in rows if r.get("user")})
-    projects = sorted({r.get("project", "") for r in rows if r.get("project")})
-
-    # Per-user stats
-    by_user: dict[str, list[dict]] = defaultdict(list)
-    for r in rows:
-        u = r.get("user", "")
-        if u:
-            by_user[u].append(r)
-
-    user_stats = {}
-    active_this_week = 0
-    for username, user_rows in by_user.items():
-        sessions = len(user_rows)
-        messages = sum(r.get("message_count", 0) for r in user_rows)
-        tool_uses = sum(r.get("tool_use_count", 0) for r in user_rows)
-        dur = sum(
-            _duration_seconds(r.get("first_timestamp", ""), r.get("last_timestamp", ""))
-            for r in user_rows
-        )
-        last_active = max((r.get("first_timestamp") or "" for r in user_rows), default="")
-
-        # Top project
-        proj_counts: dict[str, int] = defaultdict(int)
-        week_dates: set[str] = set()
-        for r in user_rows:
-            p = r.get("project", "")
-            if p:
-                proj_counts[p] += 1
-            ts = (r.get("first_timestamp") or "")[:10]
-            if ts >= week_start_str:
-                week_dates.add(ts)
-
-        top_project = max(proj_counts, key=proj_counts.get) if proj_counts else ""
-        week_days = len(week_dates)
-        if week_days > 0:
-            active_this_week += 1
-
-        user_stats[username] = {
-            "sessions": sessions,
-            "messages": messages,
-            "tool_uses": tool_uses,
-            "last_active": last_active,
-            "avg_duration_seconds": round(dur / sessions) if sessions else 0,
-            "top_project": top_project,
-            "active_days_this_week": week_days,
-        }
-
-    user_stats = dict(sorted(user_stats.items(), key=lambda x: -x[1]["sessions"]))
-
-    # Per-project stats
-    by_project: dict[str, list[dict]] = defaultdict(list)
-    for r in rows:
-        p = r.get("project", "")
-        if p:
-            by_project[p].append(r)
-
-    project_stats = {}
-    for name, proj_rows in sorted(by_project.items(), key=lambda x: -len(x[1]))[:15]:
-        project_stats[name] = {
-            "sessions": len(proj_rows),
-            "messages": sum(r.get("message_count", 0) for r in proj_rows),
-            "users": sorted({r.get("user", "") for r in proj_rows if r.get("user")}),
-        }
-
-    date_counts = _count_by_date(rows)
-    timeline = []
-    for i in range(29, -1, -1):
-        day = (today - timedelta(days=i)).isoformat()
-        timeline.append({"date": day, "count": date_counts.get(day, 0)})
-
+    counters = _replay_counters(rows)
+    user_counters = {
+        key.split(":", 1)[1]: counter
+        for key, counter in counters.items()
+        if key.startswith("user:")
+    }
     sorted_rows = sorted(rows, key=lambda r: r.get("first_timestamp") or "", reverse=True)
     recent = [_row_to_session(r) for r in sorted_rows[:10]]
-
-    return {
-        "total_sessions": total_sessions,
-        "total_messages": total_messages,
-        "total_tool_uses": total_tool_uses,
-        "unique_users": len(users),
-        "unique_projects": len(projects),
-        "avg_duration_seconds": round(total_duration / total_sessions) if total_sessions else 0,
-        "active_this_week": active_this_week,
-        "users": users,
-        "projects": projects,
-        "tool_usage": _aggregate_tool_usage(rows),
-        "timeline": timeline,
-        "user_stats": user_stats,
-        "project_stats": project_stats,
-        "recent_sessions": recent,
-    }
+    return stats.build_global_stats(
+        counters.get("global"),
+        counters.get("global:users", {}),
+        counters.get("global:projects", {}),
+        counters.get("global:daily", {}),
+        user_counters,
+        recent,
+    )

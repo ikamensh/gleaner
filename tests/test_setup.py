@@ -1,7 +1,10 @@
-"""Tests for gleaner.setup: config file I/O, hook and agent installation."""
+"""Tests for gleaner.setup: config file I/O and hook installation.
+
+The periodic sync agent (per-OS scheduler backends) is covered in
+test_cross_os.py.
+"""
 
 import json
-import plistlib
 
 import pytest
 
@@ -15,29 +18,125 @@ def isolated_paths(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "CONFIG_FILE", tmp_path / "gleaner.json")
     monkeypatch.setattr(installers, "CLAUDE_SETTINGS", tmp_path / ".claude" / "settings.json")
     monkeypatch.setattr(installers, "CURSOR_HOOKS", tmp_path / ".cursor" / "hooks.json")
-    monkeypatch.setattr(installers, "LAUNCHD_PLIST", tmp_path / "LaunchAgents" / f"{installers.LAUNCHD_LABEL}.plist")
-    # Stub out launchctl so tests don't touch the real system
-    monkeypatch.setattr(installers.subprocess, "run", lambda *a, **kw: None)
 
 
 class TestConfigRoundtrip:
-    """write_config -> read_config should preserve data."""
+    """write_config sets the active remote; get_active reads it back."""
 
     def test_roundtrip(self):
         config.write_config("https://example.com", "gl_abc123")
-        cfg = config.read_config()
-        assert cfg["url"] == "https://example.com"
-        assert cfg["token"] == "gl_abc123"
+        name, remote = config.get_active()
+        assert remote["url"] == "https://example.com"
+        assert remote["token"] == "gl_abc123"
 
     def test_read_missing_returns_empty(self):
         assert config.read_config() == {}
+        assert config.get_active() == ("", {})
 
-    def test_overwrite(self):
+    def test_overwrite_keeps_active_remote(self):
         config.write_config("https://old.com", "gl_old")
         config.write_config("https://new.com", "gl_new")
-        cfg = config.read_config()
-        assert cfg["url"] == "https://new.com"
-        assert cfg["token"] == "gl_new"
+        # write_config updates the active remote in place, not a second one
+        assert len(config.list_remotes()) == 1
+        _, remote = config.get_active()
+        assert remote["url"] == "https://new.com"
+        assert remote["token"] == "gl_new"
+
+
+class TestLegacyMigration:
+    """A flat {url, token} file is read as a single 'default' remote."""
+
+    def test_flat_file_reads_as_default_remote(self):
+        config.CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
+        config.CONFIG_FILE.write_text(
+            json.dumps({"url": "https://legacy.com", "token": "gl_legacy"})
+        )
+        name, remote = config.get_active()
+        assert name == "default"
+        assert remote == {"url": "https://legacy.com", "token": "gl_legacy"}
+
+    def test_flat_file_resolves_credentials(self, monkeypatch):
+        monkeypatch.delenv("GLEANER_URL", raising=False)
+        monkeypatch.delenv("GLEANER_TOKEN", raising=False)
+        monkeypatch.delenv("GLEANER_REMOTE", raising=False)
+        config.CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
+        config.CONFIG_FILE.write_text(
+            json.dumps({"url": "https://legacy.com", "token": "gl_legacy"})
+        )
+        assert config.get_credentials() == ("https://legacy.com", "gl_legacy")
+
+    def test_migrated_on_next_write(self):
+        config.CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
+        config.CONFIG_FILE.write_text(
+            json.dumps({"url": "https://legacy.com", "token": "gl_legacy"})
+        )
+        config.write_config("https://legacy.com", "gl_new")
+        on_disk = json.loads(config.CONFIG_FILE.read_text())
+        assert "remotes" in on_disk
+        assert on_disk["active"] == "default"
+        assert on_disk["remotes"]["default"]["token"] == "gl_new"
+
+
+class TestRemotes:
+    """add_remote / use_remote / remove_remote invariants."""
+
+    def test_add_activates_by_default(self):
+        config.add_remote("a", "https://a.com", "gl_a")
+        assert config.get_active() == ("a", {"url": "https://a.com", "token": "gl_a"})
+
+    def test_add_no_activate_keeps_active(self):
+        config.add_remote("a", "https://a.com", "gl_a")
+        config.add_remote("b", "https://b.com", "gl_b", activate=False)
+        assert config.get_active()[0] == "a"
+        assert set(config.list_remotes()) == {"a", "b"}
+
+    def test_use_switches_active(self):
+        config.add_remote("a", "https://a.com", "gl_a")
+        config.add_remote("b", "https://b.com", "gl_b", activate=False)
+        assert config.use_remote("b") is True
+        assert config.get_active()[0] == "b"
+
+    def test_use_unknown_returns_false(self):
+        assert config.use_remote("nope") is False
+
+    def test_add_replaces_existing(self):
+        config.add_remote("a", "https://a.com", "gl_a")
+        config.add_remote("a", "https://a2.com", "gl_a2")
+        assert len(config.list_remotes()) == 1
+        assert config.get_active()[1]["url"] == "https://a2.com"
+
+    def test_remove_active_repoints(self):
+        config.add_remote("a", "https://a.com", "gl_a")
+        config.add_remote("b", "https://b.com", "gl_b", activate=False)
+        assert config.remove_remote("a") is True
+        # active was 'a'; only 'b' remains, so it becomes active
+        assert config.get_active()[0] == "b"
+
+    def test_remove_last_clears_active(self):
+        config.add_remote("a", "https://a.com", "gl_a")
+        assert config.remove_remote("a") is True
+        assert config.get_active() == ("", {})
+
+    def test_remove_unknown_returns_false(self):
+        assert config.remove_remote("nope") is False
+
+    def test_credentials_follow_active(self, monkeypatch):
+        monkeypatch.delenv("GLEANER_URL", raising=False)
+        monkeypatch.delenv("GLEANER_TOKEN", raising=False)
+        monkeypatch.delenv("GLEANER_REMOTE", raising=False)
+        config.add_remote("a", "https://a.com", "gl_a")
+        config.add_remote("b", "https://b.com", "gl_b")  # now active
+        assert config.get_credentials() == ("https://b.com", "gl_b")
+        config.use_remote("a")
+        assert config.get_credentials() == ("https://a.com", "gl_a")
+
+    def test_gleaner_remote_env_selects_profile(self, monkeypatch):
+        monkeypatch.delenv("GLEANER_URL", raising=False)
+        monkeypatch.delenv("GLEANER_TOKEN", raising=False)
+        config.add_remote("a", "https://a.com", "gl_a")
+        config.add_remote("b", "https://b.com", "gl_b")  # active
+        monkeypatch.setenv("GLEANER_REMOTE", "a")
+        assert config.get_credentials() == ("https://a.com", "gl_a")
 
 
 class TestGetCredentials:
@@ -172,30 +271,3 @@ class TestCursorHookManagement:
         cfg = installers.read_cursor_hooks()
         assert len(cfg["hooks"]["stop"]) == 1
         assert cfg["hooks"]["stop"][0]["command"] == "my-other-hook"
-
-
-class TestBackfillAgent:
-    """install_backfill_agent / remove_backfill_agent manage a launchd plist."""
-
-    def test_install_creates_valid_plist(self):
-        assert installers.install_backfill_agent() is True
-        assert installers.LAUNCHD_PLIST.exists()
-        plist = plistlib.loads(installers.LAUNCHD_PLIST.read_bytes())
-        assert plist["Label"] == installers.LAUNCHD_LABEL
-        assert "--source" in plist["ProgramArguments"]
-        assert "all" in plist["ProgramArguments"]
-        assert plist["StartInterval"] == installers.BACKFILL_INTERVAL
-        assert plist["RunAtLoad"] is True
-
-    def test_install_is_idempotent(self):
-        installers.install_backfill_agent()
-        assert installers.install_backfill_agent() is False
-
-    def test_remove(self):
-        installers.install_backfill_agent()
-        assert installers.remove_backfill_agent() is True
-        assert not installers.LAUNCHD_PLIST.exists()
-        assert installers.is_backfill_agent_installed() is False
-
-    def test_remove_when_not_installed(self):
-        assert installers.remove_backfill_agent() is False

@@ -25,7 +25,7 @@ import os
 import re
 from pathlib import Path
 
-from fastapi import FastAPI, Header, HTTPException, Request, Response
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 
@@ -149,8 +149,7 @@ if LOCAL_MODE:
     _LOCAL_USER = {"name": getpass.getuser(), "active": True}
 
 
-def _require_token(authorization: str = Header("")) -> dict:
-    """Authenticate. Rejects non-onboarded Google users."""
+def _authenticate(authorization: str, allow_onboarding: bool) -> dict:
     if LOCAL_MODE:
         return _LOCAL_USER
     if MOCK_MODE:
@@ -163,28 +162,20 @@ def _require_token(authorization: str = Header("")) -> dict:
         return token_data
     google_data = _verify_google_jwt(token)
     if google_data:
-        if google_data.get("onboarding_required"):
+        if google_data.get("onboarding_required") and not allow_onboarding:
             raise HTTPException(403, "Onboarding required")
         return google_data
     raise HTTPException(403, "Invalid or revoked token")
 
 
-def _require_token_allow_onboarding(authorization: str = Header("")) -> dict:
-    """Authenticate, allowing non-onboarded Google users through."""
-    if LOCAL_MODE:
-        return _LOCAL_USER
-    if MOCK_MODE:
-        return _MOCK_USER
-    if not authorization.startswith("Bearer "):
-        raise HTTPException(401, "Missing Bearer token")
-    token = authorization[7:]
-    token_data = db.validate_token(token)
-    if token_data:
-        return token_data
-    google_data = _verify_google_jwt(token)
-    if google_data:
-        return google_data
-    raise HTTPException(403, "Invalid or revoked token")
+def require_token(authorization: str = Header("")) -> dict:
+    """Dependency: authenticate. Rejects non-onboarded Google users."""
+    return _authenticate(authorization, allow_onboarding=False)
+
+
+def require_token_allow_onboarding(authorization: str = Header("")) -> dict:
+    """Dependency: authenticate, letting non-onboarded Google users through."""
+    return _authenticate(authorization, allow_onboarding=True)
 
 
 def _require_admin(authorization: str = Header("")):
@@ -217,8 +208,7 @@ def get_config():
 
 
 @app.post("/api/session")
-async def upload_session(request: Request, authorization: str = Header("")):
-    token_data = _require_token(authorization)
+async def upload_session(request: Request, token_data: dict = Depends(require_token)):
     try:
         body = await request.json()
     except Exception:
@@ -244,7 +234,7 @@ async def upload_session(request: Request, authorization: str = Header("")):
     return {"status": "ok", "session_id": session_id}
 
 
-@app.get("/api/sessions")
+@app.get("/api/sessions", dependencies=[Depends(require_token)])
 def list_sessions(
     user: str | None = None,
     project: str | None = None,
@@ -253,10 +243,7 @@ def list_sessions(
     since: str | None = None,
     date: str | None = None,
     export: bool = False,
-    authorization: str = Header(""),
 ):
-    _require_token(authorization)
-
     uploaded_after = None
     if since:
         from datetime import datetime as _dt
@@ -279,18 +266,16 @@ def list_sessions(
     return {"sessions": sessions}
 
 
-@app.get("/api/session/{session_id}")
-def get_session(session_id: str, authorization: str = Header("")):
-    _require_token(authorization)
+@app.get("/api/session/{session_id}", dependencies=[Depends(require_token)])
+def get_session(session_id: str):
     session = db.get_session(session_id)
     if not session:
         raise HTTPException(404, "Session not found")
     return session
 
 
-@app.get("/api/session/{session_id}/raw")
-def get_session_raw(session_id: str, authorization: str = Header("")):
-    _require_token(authorization)
+@app.get("/api/session/{session_id}/raw", dependencies=[Depends(require_token)])
+def get_session_raw(session_id: str):
     data = db.get_session_transcript(session_id)
     if data is None:
         raise HTTPException(404, "Transcript not found")
@@ -302,9 +287,7 @@ def get_session_raw(session_id: str, authorization: str = Header("")):
 
 
 @app.get("/api/me")
-def get_me(authorization: str = Header("")):
-    token_data = _require_token_allow_onboarding(authorization)
-
+def get_me(token_data: dict = Depends(require_token_allow_onboarding)):
     if token_data.get("onboarding_required"):
         return {
             "onboarding_required": True,
@@ -325,15 +308,13 @@ def get_me(authorization: str = Header("")):
     return stats
 
 
-@app.get("/api/user/{username}/stats")
-def get_user_profile(username: str, authorization: str = Header("")):
-    _require_token(authorization)
+@app.get("/api/user/{username}/stats", dependencies=[Depends(require_token)])
+def get_user_profile(username: str):
     return db.get_user_stats(username)
 
 
-@app.get("/api/stats")
-def get_stats(authorization: str = Header("")):
-    _require_token(authorization)
+@app.get("/api/stats", dependencies=[Depends(require_token)])
+def get_stats():
     return db.get_stats()
 
 
@@ -341,9 +322,8 @@ def get_stats(authorization: str = Header("")):
 
 
 @app.post("/api/onboard")
-async def onboard(request: Request, authorization: str = Header("")):
+async def onboard(request: Request, token_data: dict = Depends(require_token_allow_onboarding)):
     """Complete user onboarding: set username, create user record."""
-    token_data = _require_token_allow_onboarding(authorization)
     email = token_data.get("email", "")
     if not email or token_data.get("auth_type") != "google":
         raise HTTPException(400, "Google authentication required for onboarding")
@@ -372,8 +352,7 @@ async def onboard(request: Request, authorization: str = Header("")):
 
 
 @app.get("/api/username-check/{username}")
-def check_username(username: str, authorization: str = Header("")):
-    token_data = _require_token_allow_onboarding(authorization)
+def check_username(username: str, token_data: dict = Depends(require_token_allow_onboarding)):
     email = token_data.get("email", "")
     username = username.strip().lower()
 
@@ -391,9 +370,8 @@ def _get_user_email(token_data: dict) -> str:
 
 
 @app.post("/api/tokens")
-async def create_my_token(request: Request, authorization: str = Header("")):
+async def create_my_token(request: Request, token_data: dict = Depends(require_token)):
     """Create an API token for the authenticated user."""
-    token_data = _require_token(authorization)
     email = _get_user_email(token_data)
     username = token_data.get("name", "")
 
@@ -410,17 +388,15 @@ async def create_my_token(request: Request, authorization: str = Header("")):
 
 
 @app.get("/api/tokens")
-def list_my_tokens(authorization: str = Header("")):
+def list_my_tokens(token_data: dict = Depends(require_token)):
     """List the authenticated user's tokens."""
-    token_data = _require_token(authorization)
     email = _get_user_email(token_data)
     return {"tokens": db.list_user_tokens(email)}
 
 
 @app.delete("/api/tokens/{id_or_prefix}")
-def revoke_my_token(id_or_prefix: str, authorization: str = Header("")):
+def revoke_my_token(id_or_prefix: str, token_data: dict = Depends(require_token)):
     """Revoke one of the authenticated user's tokens."""
-    token_data = _require_token(authorization)
     email = _get_user_email(token_data)
     if db.revoke_user_token(id_or_prefix, email):
         return {"status": "revoked"}
@@ -430,9 +406,8 @@ def revoke_my_token(id_or_prefix: str, authorization: str = Header("")):
 # --- Admin endpoints ---
 
 
-@app.post("/admin/tokens")
-async def create_token(request: Request, authorization: str = Header("")):
-    _require_admin(authorization)
+@app.post("/admin/tokens", dependencies=[Depends(_require_admin)])
+async def create_token(request: Request):
     try:
         body = await request.json()
     except Exception:
@@ -448,23 +423,20 @@ async def create_token(request: Request, authorization: str = Header("")):
     return {"token": token, "name": name}
 
 
-@app.get("/admin/tokens")
-def admin_list_tokens(authorization: str = Header("")):
-    _require_admin(authorization)
+@app.get("/admin/tokens", dependencies=[Depends(_require_admin)])
+def admin_list_tokens():
     return {"tokens": db.list_tokens()}
 
 
-@app.delete("/admin/tokens/{id_or_prefix}")
-def admin_revoke_token(id_or_prefix: str, authorization: str = Header("")):
-    _require_admin(authorization)
+@app.delete("/admin/tokens/{id_or_prefix}", dependencies=[Depends(_require_admin)])
+def admin_revoke_token(id_or_prefix: str):
     if db.revoke_token(id_or_prefix):
         return {"status": "revoked"}
     raise HTTPException(404, "Token not found")
 
 
-@app.post("/admin/backup")
-def admin_backup(authorization: str = Header("")):
-    _require_admin(authorization)
+@app.post("/admin/backup", dependencies=[Depends(_require_admin)])
+def admin_backup():
     try:
         return db.export_firestore()
     except Exception as e:
