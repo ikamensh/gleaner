@@ -2,28 +2,16 @@
 
 ## Goal
 
-Harden the core capture contract around idempotent uploads and safe local acceptance testing.
+Iteration 2: Add a read-only `gleaner sessions` CLI command that lists locally-captured sessions from the local vault.
 
 ## Acceptance Signal
 
-- A duplicate `session_id` upload uses last-write-wins semantics.
-- The newer upload replaces transcript and metadata for that `session_id`.
-- Counters, stats, and exports count unique `session_id`s only and never inflate from duplicate uploads.
-- Mock/local storage and cloud database storage agree on duplicate behavior.
-- Default CI and local acceptance tests prove capture, duplicate replacement, unique-session counting, exports, and raw retrieval without touching production.
-- Live-uploading end-to-end tests are behind explicit opt-in only; default CI must not create deployed-service data.
-- Docs reflect actual supported sources and current behavior: Claude Code and Cursor capture here, with Codex capture pending in a separate branch.
-- Code changes are PR'd against `ikamensh/gleaner`, Hive's working repository for now.
-
-## Likely Next Steps
-
-1. Write acceptance stories for capture, duplicate replacement, unique stats/counting, exports, and raw retrieval.
-2. Add or adjust tests for mock/local duplicate behavior.
-3. Fix storage behavior so duplicate `session_id` replacement is consistent across mock and cloud paths.
-4. Gate live production end-to-end tests behind explicit opt-in.
-5. Reconcile README, storage docs, and collected-data docs with the supported-source reality.
-
-## Out of Scope for This Branch
-
-Do not build the Codex capture adapter here. Codex capture remains in scope for the overall spec, but implementation lands separately from the local `codex-capture` branch.
-
+- A `gleaner sessions` CLI command is added.
+- It lists locally-captured sessions from the local vault, one row per unique `session_id`.
+- Displayed fields: source (claude/cursor), project, last-updated time, and message count.
+- Order is newest-first.
+- Supports optional `--source` and `--limit` (default 20) flags.
+- Command is strictly read-only, uses no network, and never touches production.
+- A deterministic test captures a couple of mock sessions into a temp vault and asserts the command lists them with correct fields newest-first and that `--source` filters correctly.
+- The command is documented in the README CLI section.
+- PR against `ikamensh/gleaner`.
