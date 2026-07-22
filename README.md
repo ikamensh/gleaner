@@ -49,6 +49,7 @@ gleaner backfill                     # Upload existing Claude Code sessions from
 gleaner backfill --source cursor     # Upload existing Cursor sessions from ~/.cursor/projects/
 gleaner backfill --dry-run           # Preview what would be uploaded
 gleaner collect                      # Collect local IDE sessions into the local vault
+gleaner sessions                     # List locally-captured sessions from the local vault
 gleaner pull                         # Download sessions for local analysis (Parquet)
 gleaner pull --transcripts           # Also download raw transcripts
 gleaner serve                        # Start local dashboard (http://127.0.0.1:8765)
@@ -195,7 +196,7 @@ gleaner/
     backfill.py             # gleaner backfill: upload existing sessions (all sources)
     pull.py                 # gleaner pull: download sessions to Parquet
     tray.py                 # gleaner tray: menu bar / system tray status + on/off
-    cli.py                  # gleaner command: setup, status, on/off, auth, backfill, collect, serve, pull, tray
+    cli.py                  # gleaner command: setup, status, on/off, auth, backfill, collect, sessions, serve, pull, tray
   server/                   # FastAPI server (deployed to Cloud Run)
     server.py               # API routes and auth
     db_local.py             # Local-vault storage backend (gleaner serve)

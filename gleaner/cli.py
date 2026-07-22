@@ -237,6 +237,63 @@ def cmd_pull(args):
     run(output=args.output, transcripts=args.transcripts, workers=args.workers)
 
 
+def cmd_sessions(args):
+    import gleaner.vault as gvault
+    import pyarrow.parquet as pq
+
+    index = gvault.VAULT_DIR / "index.parquet"
+    if not index.exists():
+        print("No sessions found in the local vault.")
+        return
+
+    try:
+        table = pq.read_table(index)
+        rows = table.to_pylist()
+    except Exception as e:
+        print(f"Error reading local vault: {e}", file=sys.stderr)
+        return
+
+    # De-duplicate by unique session_id, keeping the newest-first based on last_timestamp
+    # Sort descending by last_timestamp
+    sorted_rows = sorted(rows, key=lambda r: r.get("last_timestamp") or "", reverse=True)
+    seen = set()
+    unique_rows = []
+    for r in sorted_rows:
+        sid = r.get("session_id")
+        if sid and sid not in seen:
+            seen.add(sid)
+            unique_rows.append(r)
+
+    # Filter by source if requested
+    if args.source and args.source != "all":
+        target_ide = "claude_code" if args.source == "claude" else args.source
+        unique_rows = [r for r in unique_rows if r.get("ide") == target_ide]
+
+    if not unique_rows:
+        print("No sessions found in the local vault.")
+        return
+
+    # Limit results
+    if args.limit:
+        unique_rows = unique_rows[:args.limit]
+
+    # Print nicely aligned columns
+    print(f"{'SESSION ID':<15} {'SOURCE':<10} {'PROJECT':<25} {'LAST UPDATED':<20} {'MESSAGES':<8}")
+    print("-" * 82)
+    for r in unique_rows:
+        sid = r.get("session_id") or ""
+        ide = r.get("ide") or ""
+        source = "claude" if ide == "claude_code" else ide
+        project = r.get("project") or ""
+        if len(project) > 23:
+            project = project[:20] + "..."
+        last_updated = r.get("last_timestamp") or ""
+        if last_updated:
+            last_updated = last_updated.replace("T", " ")[:19]
+        messages = r.get("message_count", 0)
+        print(f"{sid[:12]:<15} {source:<10} {project:<25} {last_updated:<20} {messages:<8}")
+
+
 def main():
     parser = argparse.ArgumentParser(prog="gleaner", description="Gleaner CLI")
     sub = parser.add_subparsers(dest="command")
@@ -299,6 +356,19 @@ def main():
     p.add_argument("--transcripts", action="store_true", help="Also download raw transcripts")
     p.add_argument("-j", "--workers", type=int, default=4, help="Parallel downloads")
 
+    p = sub.add_parser("sessions", help="List local sessions from the vault")
+    p.add_argument(
+        "--source",
+        choices=["claude", "cursor", "codex", "all"],
+        help="Filter by session source (claude, cursor, codex)",
+    )
+    p.add_argument(
+        "--limit",
+        type=int,
+        default=20,
+        help="Limit the number of sessions displayed (default: 20)",
+    )
+
     args = parser.parse_args()
     if not args.command:
         parser.print_help()
@@ -316,6 +386,7 @@ def main():
         "collect": cmd_collect,
         "backfill": cmd_backfill,
         "pull": cmd_pull,
+        "sessions": cmd_sessions,
     }
     commands[args.command](args)
 
